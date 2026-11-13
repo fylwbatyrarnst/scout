@@ -9,28 +9,46 @@ import {
 const SiteContext = createContext();
 
 const LOCAL_CACHE_KEY = "rover_site_data_cache_v1";
+const DELETED_EVENTS_KEY = "rover_deleted_event_ids_v1";
 const POLL_INTERVAL_MS = 12000;
 
-function normalizeSiteData(raw) {
+function readDeletedEventIds() {
+  try {
+    const raw = localStorage.getItem(DELETED_EVENTS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDeletedEventIds(ids) {
+  try {
+    localStorage.setItem(DELETED_EVENTS_KEY, JSON.stringify(Array.from(new Set(ids.map(String)))));
+  } catch {
+    // تجاهل
+  }
+}
+
+function normalizeSiteData(raw, deletedIds = []) {
   const src = raw && typeof raw === "object" ? raw : {};
+  const deletedSet = new Set((deletedIds || []).map(String));
 
   const hasEventsArray = Array.isArray(src.upcomingEvents);
-  const eventsSource = hasEventsArray
-    ? src.upcomingEvents
-    : src.upcomingEvent && typeof src.upcomingEvent === "object"
-    ? [src.upcomingEvent]
-    : defaultSiteData.upcomingEvents;
+  const eventsSource = hasEventsArray ? src.upcomingEvents : defaultSiteData.upcomingEvents;
 
-  const normalizedEvents = eventsSource.map((ev, idx) => ({
-    id: ev?.id ?? `${Date.now()}-${idx}`,
-    active: ev?.active !== false,
-    title: ev?.title || "فعالية كشفية قادمة",
-    date: ev?.date || "2027-02-10T10:00",
-    location: ev?.location || "كلية العلوم - جامعة عين شمس",
-    description: ev?.description || ev?.shortDesc || "",
-    shortDesc: ev?.shortDesc || ev?.description || "",
-    image: typeof ev?.image === "string" ? ev.image : "",
-  }));
+  const normalizedEvents = eventsSource
+    .filter((ev) => ev && !deletedSet.has(String(ev.id)))
+    .map((ev, idx) => ({
+      id: ev?.id ?? `${Date.now()}-${idx}`,
+      active: ev?.active !== false,
+      title: ev?.title || "فعالية كشفية قادمة",
+      date: ev?.date || "2027-02-10T10:00",
+      location: ev?.location || "كلية العلوم - جامعة عين شمس",
+      description: ev?.description || ev?.shortDesc || "",
+      shortDesc: ev?.shortDesc || ev?.description || "",
+      image: typeof ev?.image === "string" ? ev.image : "",
+    }));
 
   const hasGalleryArray = Array.isArray(src.gallery);
   const gallerySource = hasGalleryArray ? src.gallery : defaultSiteData.gallery;
@@ -66,7 +84,7 @@ function readLocalCache() {
   try {
     const raw = localStorage.getItem(LOCAL_CACHE_KEY);
     if (!raw) return null;
-    return normalizeSiteData(JSON.parse(raw));
+    return normalizeSiteData(JSON.parse(raw), readDeletedEventIds());
   } catch {
     return null;
   }
@@ -77,7 +95,6 @@ function writeLocalCache(data) {
     localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(data));
     return true;
   } catch {
-    // في حال امتلاء localStorage بسبب صورة كبيرة، نحاول حفظ نسخة بدون صور base64 الثقيلة
     try {
       const lighter = {
         ...data,
@@ -103,7 +120,7 @@ function writeLocalCache(data) {
 
 export function SiteProvider({ children }) {
   const [siteData, setSiteData] = useState(() => {
-    return readLocalCache() || normalizeSiteData(defaultSiteData);
+    return readLocalCache() || normalizeSiteData(defaultSiteData, readDeletedEventIds());
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncError, setLastSyncError] = useState("");
@@ -122,13 +139,16 @@ export function SiteProvider({ children }) {
       if (isSavingRef.current) return;
 
       if (remote && remote.data && typeof remote.data === "object") {
-        const normalized = normalizeSiteData(remote.data);
+        const normalized = normalizeSiteData(remote.data, readDeletedEventIds());
         siteDataRef.current = normalized;
         setSiteData(normalized);
         writeLocalCache(normalized);
         setLastSyncError("");
       } else if (remote && remote.isEmpty) {
-        const seed = normalizeSiteData(siteDataRef.current || defaultSiteData);
+        const seed = normalizeSiteData(
+          siteDataRef.current || defaultSiteData,
+          readDeletedEventIds()
+        );
         await saveRemoteSiteData(seed);
         setLastSyncError("");
       }
@@ -159,10 +179,10 @@ export function SiteProvider({ children }) {
   }, [refreshFromCloud]);
 
   const commitState = useCallback(async (updater) => {
-    const prevNormalized = normalizeSiteData(siteDataRef.current);
+    const prevNormalized = normalizeSiteData(siteDataRef.current, readDeletedEventIds());
     const computed =
       typeof updater === "function" ? updater(prevNormalized) : updater;
-    const nextNormalized = normalizeSiteData(computed);
+    const nextNormalized = normalizeSiteData(computed, readDeletedEventIds());
 
     siteDataRef.current = nextNormalized;
     setSiteData(nextNormalized);
@@ -214,8 +234,12 @@ export function SiteProvider({ children }) {
 
   const addUpcomingEvent = useCallback(
     (newEvent) => {
+      const id = Date.now();
+      const updatedDeleted = readDeletedEventIds().filter((x) => x !== String(id));
+      writeDeletedEventIds(updatedDeleted);
+
       const created = {
-        id: Date.now(),
+        id,
         active: newEvent?.active !== false,
         title: newEvent?.title || "فعالية كشفية قادمة",
         date: newEvent?.date || "2027-02-10T10:00",
@@ -256,6 +280,9 @@ export function SiteProvider({ children }) {
 
   const deleteUpcomingEvent = useCallback(
     (id) => {
+      const nextDeleted = [...readDeletedEventIds(), String(id)];
+      writeDeletedEventIds(nextDeleted);
+
       return commitState((prev) => ({
         ...prev,
         upcomingEvents: prev.upcomingEvents.filter(
@@ -325,7 +352,8 @@ export function SiteProvider({ children }) {
   );
 
   const resetToDefault = useCallback(() => {
-    const fresh = normalizeSiteData(defaultSiteData);
+    writeDeletedEventIds([]);
+    const fresh = normalizeSiteData(defaultSiteData, []);
     return commitState(fresh);
   }, [commitState]);
 
