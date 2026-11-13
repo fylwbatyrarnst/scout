@@ -14,46 +14,48 @@ const POLL_INTERVAL_MS = 12000;
 function normalizeSiteData(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
 
-  const eventsSource = Array.isArray(src.upcomingEvents)
+  const hasEventsArray = Array.isArray(src.upcomingEvents);
+  const eventsSource = hasEventsArray
     ? src.upcomingEvents
     : src.upcomingEvent && typeof src.upcomingEvent === "object"
     ? [src.upcomingEvent]
     : defaultSiteData.upcomingEvents;
 
   const normalizedEvents = eventsSource.map((ev, idx) => ({
-    id: ev?.id ?? Date.now() + idx,
+    id: ev?.id ?? `${Date.now()}-${idx}`,
     active: ev?.active !== false,
     title: ev?.title || "فعالية كشفية قادمة",
     date: ev?.date || "2027-02-10T10:00",
     location: ev?.location || "كلية العلوم - جامعة عين شمس",
     description: ev?.description || ev?.shortDesc || "",
     shortDesc: ev?.shortDesc || ev?.description || "",
-    image: ev?.image || "",
+    image: typeof ev?.image === "string" ? ev.image : "",
   }));
 
-  const gallerySource = Array.isArray(src.gallery) ? src.gallery : defaultSiteData.gallery;
+  const hasGalleryArray = Array.isArray(src.gallery);
+  const gallerySource = hasGalleryArray ? src.gallery : defaultSiteData.gallery;
   const normalizedGallery = gallerySource.map((item, idx) => ({
-    id: item?.id ?? Date.now() + 100 + idx,
+    id: item?.id ?? `${Date.now()}-g-${idx}`,
     title: item?.title || "فعالية كشفية",
     icon: item?.icon || "🏕️",
     shortDesc: item?.shortDesc || "",
     details: item?.details || item?.shortDesc || "",
-    image: item?.image || "",
+    image: typeof item?.image === "string" ? item.image : "",
   }));
 
-  const requestsSource = Array.isArray(src.joinRequests)
+  const hasRequestsArray = Array.isArray(src.joinRequests);
+  const requestsSource = hasRequestsArray
     ? src.joinRequests
     : defaultSiteData.joinRequests;
 
+  const rawLogo = typeof src.logoUrl === "string" ? src.logoUrl.trim() : "";
+  const rawHero =
+    typeof src.heroBackgroundUrl === "string" ? src.heroBackgroundUrl.trim() : "";
+
   return {
-    logoUrl:
-      typeof src.logoUrl === "string" && src.logoUrl.trim()
-        ? src.logoUrl
-        : defaultSiteData.logoUrl,
+    logoUrl: rawLogo || defaultSiteData.logoUrl,
     heroBackgroundUrl:
-      typeof src.heroBackgroundUrl === "string" && src.heroBackgroundUrl.trim()
-        ? src.heroBackgroundUrl
-        : defaultSiteData.heroBackgroundUrl,
+      src.heroBackgroundUrl === "" ? "" : rawHero || defaultSiteData.heroBackgroundUrl,
     upcomingEvents: normalizedEvents,
     gallery: normalizedGallery,
     joinRequests: requestsSource,
@@ -73,8 +75,29 @@ function readLocalCache() {
 function writeLocalCache(data) {
   try {
     localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(data));
+    return true;
   } catch {
-    // تجاهل أخطاء التخزين المحلي
+    // في حال امتلاء localStorage بسبب صورة كبيرة، نحاول حفظ نسخة بدون صور base64 الثقيلة
+    try {
+      const lighter = {
+        ...data,
+        heroBackgroundUrl: data.heroBackgroundUrl?.startsWith("data:")
+          ? defaultSiteData.heroBackgroundUrl
+          : data.heroBackgroundUrl,
+        upcomingEvents: (data.upcomingEvents || []).map((ev) => ({
+          ...ev,
+          image: ev.image?.startsWith("data:") ? "" : ev.image,
+        })),
+        gallery: (data.gallery || []).map((g) => ({
+          ...g,
+          image: g.image?.startsWith("data:") ? "" : g.image,
+        })),
+      };
+      localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(lighter));
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -100,6 +123,7 @@ export function SiteProvider({ children }) {
 
       if (remote && remote.data && typeof remote.data === "object") {
         const normalized = normalizeSiteData(remote.data);
+        siteDataRef.current = normalized;
         setSiteData(normalized);
         writeLocalCache(normalized);
         setLastSyncError("");
@@ -179,10 +203,10 @@ export function SiteProvider({ children }) {
 
   const updateHeroBackgroundUrl = useCallback(
     (heroBackgroundUrl) => {
+      const cleaned = String(heroBackgroundUrl || "").trim();
       return commitState((prev) => ({
         ...prev,
-        heroBackgroundUrl:
-          String(heroBackgroundUrl || "").trim() || defaultSiteData.heroBackgroundUrl,
+        heroBackgroundUrl: cleaned || defaultSiteData.heroBackgroundUrl,
       }));
     },
     [commitState]
@@ -198,7 +222,7 @@ export function SiteProvider({ children }) {
         location: newEvent?.location || "كلية العلوم - جامعة عين شمس",
         description: newEvent?.description || "",
         shortDesc: newEvent?.description || "",
-        image: newEvent?.image || "",
+        image: typeof newEvent?.image === "string" ? newEvent.image : "",
       };
 
       return commitState((prev) => ({
@@ -214,7 +238,7 @@ export function SiteProvider({ children }) {
       return commitState((prev) => ({
         ...prev,
         upcomingEvents: prev.upcomingEvents.map((ev) =>
-          ev.id === id
+          String(ev.id) === String(id)
             ? {
                 ...ev,
                 ...updatedFields,
@@ -234,7 +258,9 @@ export function SiteProvider({ children }) {
     (id) => {
       return commitState((prev) => ({
         ...prev,
-        upcomingEvents: prev.upcomingEvents.filter((ev) => ev.id !== id),
+        upcomingEvents: prev.upcomingEvents.filter(
+          (ev) => String(ev.id) !== String(id)
+        ),
       }));
     },
     [commitState]
@@ -248,7 +274,7 @@ export function SiteProvider({ children }) {
         icon: item?.icon || "🏕️",
         shortDesc: item?.shortDesc || "",
         details: item?.details || item?.shortDesc || "",
-        image: item?.image || "",
+        image: typeof item?.image === "string" ? item.image : "",
       };
 
       return commitState((prev) => ({
@@ -263,7 +289,7 @@ export function SiteProvider({ children }) {
     (id) => {
       return commitState((prev) => ({
         ...prev,
-        gallery: prev.gallery.filter((item) => item.id !== id),
+        gallery: prev.gallery.filter((item) => String(item.id) !== String(id)),
       }));
     },
     [commitState]
@@ -291,7 +317,7 @@ export function SiteProvider({ children }) {
       return commitState((prev) => ({
         ...prev,
         joinRequests: prev.joinRequests.map((r) =>
-          r.id === id ? { ...r, status } : r
+          String(r.id) === String(id) ? { ...r, status } : r
         ),
       }));
     },

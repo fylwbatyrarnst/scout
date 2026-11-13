@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useSite } from "../context/SiteContext";
@@ -74,6 +75,7 @@ export default function AdminDashboard() {
 
   const [heroBgInput, setHeroBgInput] = useState(siteData.heroBackgroundUrl || "");
   const [heroBgSaved, setHeroBgSaved] = useState(false);
+  const [heroBgError, setHeroBgError] = useState("");
 
   const [newEventForm, setNewEventForm] = useState(EMPTY_EVENT);
   const [editingEventId, setEditingEventId] = useState(null);
@@ -94,15 +96,17 @@ export default function AdminDashboard() {
     setHeroBgInput(siteData.heroBackgroundUrl || "");
   }, [siteData.logoUrl, siteData.heroBackgroundUrl]);
 
-  const handleFileChange = async (e, onPicked, maxWidth = 900) => {
+  const handleFileChange = async (e, onPicked, maxWidth = 900, quality = 0.72) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
     try {
-      const base64 = await pickFileFromDevice(file, maxWidth);
+      const base64 = await pickFileFromDevice(file, maxWidth, quality);
       onPicked(base64);
+      return base64;
     } catch (err) {
-      alert(err.message);
+      alert(err?.message || "تعذر تحميل الصورة من الجهاز.");
+      return null;
     }
   };
 
@@ -144,20 +148,52 @@ export default function AdminDashboard() {
     });
   };
 
-  const handleSaveEditedEvent = (e) => {
+  const handleSaveEditedEvent = async (e) => {
     e.preventDefault();
-    updateUpcomingEvent(editingEventId, editEventForm);
+    const res = await updateUpcomingEvent(editingEventId, editEventForm);
     setEditingEventId(null);
-    setEventNotice("✅ تم تحديث بيانات الحدث!");
-    setTimeout(() => setEventNotice(""), 3000);
+    setEventNotice(
+      res?.ok === false
+        ? `⚠️ تم التحديث محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "✅ تم تحديث بيانات الحدث!"
+    );
+    setTimeout(() => setEventNotice(""), 3500);
   };
 
-  const handleAddNewEvent = (e) => {
+  const handleAddNewEvent = async (e) => {
     e.preventDefault();
-    addUpcomingEvent(newEventForm);
+    const res = await addUpcomingEvent(newEventForm);
     setNewEventForm(EMPTY_EVENT);
-    setEventNotice("✅ تمت إضافة الحدث الجديد!");
-    setTimeout(() => setEventNotice(""), 3000);
+    setEventNotice(
+      res?.ok === false
+        ? `⚠️ تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "✅ تمت إضافة الحدث الجديد!"
+    );
+    setTimeout(() => setEventNotice(""), 3500);
+  };
+
+  const handleDeleteEvent = async (id) => {
+    const res = await deleteUpcomingEvent(id);
+    if (res?.ok === false) {
+      setEventNotice(`⚠️ تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`);
+      setTimeout(() => setEventNotice(""), 3500);
+    }
+  };
+
+  const handleSaveHeroBg = async (e) => {
+    e.preventDefault();
+    setHeroBgError("");
+    try {
+      const res = await updateHeroBackgroundUrl(heroBgInput);
+      if (res?.ok === false) {
+        setHeroBgError(res.cloudError || "تعذر حفظ خلفية الهيرو على السحابة");
+        return;
+      }
+      setHeroBgSaved(true);
+      setTimeout(() => setHeroBgSaved(false), 3000);
+    } catch (err) {
+      setHeroBgError(err?.message || "حدث خطأ أثناء حفظ خلفية الهيرو");
+    }
   };
 
   if (!isAuth) {
@@ -215,7 +251,7 @@ export default function AdminDashboard() {
           {isCloudEnabled && (
             <button
               type="button"
-              onClick={refreshFromCloud}
+              onClick={() => refreshFromCloud()}
               className="btn btn-outline-gold btn-sm"
               title="مزامنة الآن"
             >
@@ -522,7 +558,9 @@ export default function AdminDashboard() {
                             </span>
                           </div>
                           <div className="small text-secondary">{ev.location}</div>
-                          <div className="small text-light opacity-75">{ev.shortDesc || ev.description}</div>
+                          <div className="small text-light opacity-75">
+                            {ev.shortDesc || ev.description}
+                          </div>
                         </div>
                       </div>
 
@@ -536,7 +574,7 @@ export default function AdminDashboard() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => deleteUpcomingEvent(ev.id)}
+                          onClick={() => handleDeleteEvent(ev.id)}
                           className="btn btn-outline-danger btn-sm"
                         >
                           حذف
@@ -786,7 +824,7 @@ export default function AdminDashboard() {
                     type="file"
                     accept="image/*"
                     className="form-control bg-dark text-white border-secondary mb-3"
-                    onChange={(e) => handleFileChange(e, (img) => setLogoInput(img), 400)}
+                    onChange={(e) => handleFileChange(e, (img) => setLogoInput(img), 400, 0.8)}
                   />
                   {logoInput && (
                     <div className="mb-3 text-center">
@@ -811,20 +849,16 @@ export default function AdminDashboard() {
             <div className="col-lg-6">
               <div className="card rover-card p-4 h-100">
                 <h5 className="fw-bold text-warning mb-3">تحديث خلفية الهيرو</h5>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    updateHeroBackgroundUrl(heroBgInput);
-                    setHeroBgSaved(true);
-                    setTimeout(() => setHeroBgSaved(false), 3000);
-                  }}
-                >
+                <form onSubmit={handleSaveHeroBg}>
                   <label className="form-label small text-warning">اختر صورة الخلفية من الهاتف</label>
                   <input
                     type="file"
                     accept="image/*"
                     className="form-control bg-dark text-white border-secondary mb-3"
-                    onChange={(e) => handleFileChange(e, (img) => setHeroBgInput(img), 1100)}
+                    onChange={(e) => {
+                      setHeroBgError("");
+                      handleFileChange(e, (img) => setHeroBgInput(img), 800, 0.68);
+                    }}
                   />
                   {heroBgInput && (
                     <div className="mb-3 text-center">
@@ -834,6 +868,11 @@ export default function AdminDashboard() {
                         className="img-fluid rounded-3 border border-warning"
                         style={{ maxHeight: "110px", objectFit: "cover" }}
                       />
+                    </div>
+                  )}
+                  {heroBgError && (
+                    <div className="alert alert-danger py-2 small text-center mb-2">
+                      {heroBgError}
                     </div>
                   )}
                   <button type="submit" className="btn btn-gold w-100">
