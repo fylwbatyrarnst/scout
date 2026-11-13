@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+} from "react";
 import {
   isCloudConfigured,
   fetchRemoteSiteData,
@@ -9,6 +16,16 @@ const SiteContext = createContext();
 
 const LOCAL_CACHE_KEY = "rover_site_data_cache_v2";
 const POLL_INTERVAL_MS = 15000;
+
+const EMPTY_SITE_DATA = {
+  logoUrl: "",
+  heroBackgroundUrl: "",
+  upcomingEvents: [],
+  gallery: [],
+  activities: [],
+  committees: [],
+  joinRequests: [],
+};
 
 function normalizeSiteData(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
@@ -53,6 +70,27 @@ function normalizeSiteData(raw) {
       })
     : [];
 
+  const activities = Array.isArray(src.activities)
+    ? src.activities.map((act, idx) => ({
+        id: act?.id ?? `${Date.now()}-a-${idx}`,
+        title: typeof act?.title === "string" ? act.title : "",
+        icon: typeof act?.icon === "string" ? act.icon : "bi-stars",
+        description:
+          typeof act?.description === "string" ? act.description : "",
+      }))
+    : [];
+
+  const committees = Array.isArray(src.committees)
+    ? src.committees.map((com, idx) => ({
+        id: com?.id ?? `${Date.now()}-c-${idx}`,
+        title: typeof com?.title === "string" ? com.title : "",
+        icon: typeof com?.icon === "string" ? com.icon : "bi-people",
+        summary: typeof com?.summary === "string" ? com.summary : "",
+        tasks: Array.isArray(com?.tasks) ? com.tasks : [],
+        skills: Array.isArray(com?.skills) ? com.skills : [],
+      }))
+    : [];
+
   const joinRequests = Array.isArray(src.joinRequests) ? src.joinRequests : [];
 
   return {
@@ -61,6 +99,8 @@ function normalizeSiteData(raw) {
       typeof src.heroBackgroundUrl === "string" ? src.heroBackgroundUrl : "",
     upcomingEvents,
     gallery,
+    activities,
+    committees,
     joinRequests,
   };
 }
@@ -103,14 +143,6 @@ function writeLocalCache(data) {
   }
 }
 
-const EMPTY_SITE_DATA = {
-  logoUrl: "",
-  heroBackgroundUrl: "",
-  upcomingEvents: [],
-  gallery: [],
-  joinRequests: [],
-};
-
 export function SiteProvider({ children }) {
   const [siteData, setSiteData] = useState(() => {
     return readLocalCache() || EMPTY_SITE_DATA;
@@ -144,7 +176,9 @@ export function SiteProvider({ children }) {
       }
     } catch (err) {
       if (!isSavingRef.current) {
-        setLastSyncError(err?.message || "تعذر الاتصال بقاعدة البيانات السحابية");
+        setLastSyncError(
+          err?.message || "تعذر الاتصال بقاعدة البيانات السحابية"
+        );
       }
     } finally {
       if (!silent) setIsSyncing(false);
