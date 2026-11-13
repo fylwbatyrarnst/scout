@@ -62,7 +62,7 @@ function normalizeSiteData(raw) {
         return {
           id: item?.id ?? `${Date.now()}-g-${idx}`,
           title: typeof item?.title === "string" ? item.title : "",
-          icon: typeof item?.icon === "string" ? item.icon : "🏕️",
+          icon: typeof item?.icon === "string" ? item.icon : "",
           shortDesc: typeof item?.shortDesc === "string" ? item.shortDesc : "",
           details: detailsText,
           image: typeof item?.image === "string" ? item.image : "",
@@ -73,10 +73,11 @@ function normalizeSiteData(raw) {
   const activities = Array.isArray(src.activities)
     ? src.activities.map((act, idx) => ({
         id: act?.id ?? `${Date.now()}-a-${idx}`,
+        badge: typeof act?.badge === "string" ? act.badge : "مجال كشفي",
         title: typeof act?.title === "string" ? act.title : "",
-        icon: typeof act?.icon === "string" ? act.icon : "bi-stars",
         description:
           typeof act?.description === "string" ? act.description : "",
+        image: typeof act?.image === "string" ? act.image : "",
       }))
     : [];
 
@@ -84,8 +85,8 @@ function normalizeSiteData(raw) {
     ? src.committees.map((com, idx) => ({
         id: com?.id ?? `${Date.now()}-c-${idx}`,
         title: typeof com?.title === "string" ? com.title : "",
-        icon: typeof com?.icon === "string" ? com.icon : "bi-people",
         summary: typeof com?.summary === "string" ? com.summary : "",
+        image: typeof com?.image === "string" ? com.image : "",
         tasks: Array.isArray(com?.tasks) ? com.tasks : [],
         skills: Array.isArray(com?.skills) ? com.skills : [],
       }))
@@ -133,6 +134,14 @@ function writeLocalCache(data) {
         gallery: (data.gallery || []).map((g) => ({
           ...g,
           image: g.image?.startsWith("data:") ? "" : g.image,
+        })),
+        activities: (data.activities || []).map((a) => ({
+          ...a,
+          image: a.image?.startsWith("data:") ? "" : a.image,
+        })),
+        committees: (data.committees || []).map((c) => ({
+          ...c,
+          image: c.image?.startsWith("data:") ? "" : c.image,
         })),
       };
       localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(lighter));
@@ -281,7 +290,7 @@ export function SiteProvider({ children }) {
         location: typeof newEvent?.location === "string" ? newEvent.location : "",
         description: desc,
         shortDesc: desc,
-        image: typeof newEvent?.image === "string" ? newEvent.image : "",
+        image: typeof newEvent?.image === "string" ? newEvent.image.trim() : "",
       };
 
       return commitState((prev) => ({
@@ -328,7 +337,7 @@ export function SiteProvider({ children }) {
             shortDesc: nextDesc,
             image:
               updatedFields?.image !== undefined
-                ? String(updatedFields.image)
+                ? String(updatedFields.image).trim()
                 : ev.image,
           };
         }),
@@ -361,10 +370,10 @@ export function SiteProvider({ children }) {
       const created = {
         id: Date.now(),
         title: typeof item?.title === "string" ? item.title : "",
-        icon: typeof item?.icon === "string" ? item.icon : "🏕️",
+        icon: typeof item?.icon === "string" ? item.icon : "",
         shortDesc: typeof item?.shortDesc === "string" ? item.shortDesc : "",
         details: detailsText,
-        image: typeof item?.image === "string" ? item.image : "",
+        image: typeof item?.image === "string" ? item.image.trim() : "",
       };
 
       return commitState((prev) => ({
@@ -380,6 +389,172 @@ export function SiteProvider({ children }) {
       return commitState((prev) => ({
         ...prev,
         gallery: prev.gallery.filter((item) => String(item.id) !== String(id)),
+      }));
+    },
+    [commitState]
+  );
+
+  const addActivity = useCallback(
+    (act) => {
+      const created = {
+        id: Date.now(),
+        badge: typeof act?.badge === "string" ? act.badge.trim() : "مجال كشفي",
+        title: typeof act?.title === "string" ? act.title.trim() : "",
+        description:
+          typeof act?.description === "string" ? act.description.trim() : "",
+        image: typeof act?.image === "string" ? act.image.trim() : "",
+      };
+
+      return commitState((prev) => ({
+        ...prev,
+        activities: [...prev.activities, created],
+      }));
+    },
+    [commitState]
+  );
+
+  const updateActivity = useCallback(
+    (id, updatedFields) => {
+      return commitState((prev) => ({
+        ...prev,
+        activities: prev.activities.map((act) => {
+          if (String(act.id) !== String(id)) return act;
+          return {
+            ...act,
+            badge:
+              updatedFields?.badge !== undefined
+                ? String(updatedFields.badge).trim()
+                : act.badge,
+            title:
+              updatedFields?.title !== undefined
+                ? String(updatedFields.title).trim()
+                : act.title,
+            description:
+              updatedFields?.description !== undefined
+                ? String(updatedFields.description).trim()
+                : act.description,
+            image:
+              updatedFields?.image !== undefined
+                ? String(updatedFields.image).trim()
+                : act.image,
+          };
+        }),
+      }));
+    },
+    [commitState]
+  );
+
+  const deleteActivity = useCallback(
+    (id) => {
+      return commitState((prev) => ({
+        ...prev,
+        activities: prev.activities.filter(
+          (act) => String(act.id) !== String(id)
+        ),
+      }));
+    },
+    [commitState]
+  );
+
+  const addCommittee = useCallback(
+    (com) => {
+      const tasksArr = Array.isArray(com?.tasks)
+        ? com.tasks
+        : String(com?.tasksText || "")
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+      const skillsArr = Array.isArray(com?.skills)
+        ? com.skills
+        : String(com?.skillsText || "")
+            .split(/[,،\n]/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+      const created = {
+        id: Date.now(),
+        title: typeof com?.title === "string" ? com.title.trim() : "",
+        summary: typeof com?.summary === "string" ? com.summary.trim() : "",
+        image: typeof com?.image === "string" ? com.image.trim() : "",
+        tasks: tasksArr,
+        skills: skillsArr,
+      };
+
+      return commitState((prev) => ({
+        ...prev,
+        committees: [...prev.committees, created],
+      }));
+    },
+    [commitState]
+  );
+
+  const updateCommittee = useCallback(
+    (id, updatedFields) => {
+      return commitState((prev) => ({
+        ...prev,
+        committees: prev.committees.map((com) => {
+          if (String(com.id) !== String(id)) return com;
+
+          const nextTasks = Array.isArray(updatedFields?.tasks)
+            ? updatedFields.tasks
+            : updatedFields?.tasksText !== undefined
+            ? String(updatedFields.tasksText)
+                .split("\n")
+                .map((s) => s.trim())
+                .filter(Boolean)
+            : com.tasks;
+
+          const nextSkills = Array.isArray(updatedFields?.skills)
+            ? updatedFields.skills
+            : updatedFields?.skillsText !== undefined
+            ? String(updatedFields.skillsText)
+                .split(/[,،\n]/)
+                .map((s) => s.trim())
+                .filter(Boolean)
+            : com.skills;
+
+          return {
+            ...com,
+            title:
+              updatedFields?.title !== undefined
+                ? String(updatedFields.title).trim()
+                : com.title,
+            summary:
+              updatedFields?.summary !== undefined
+                ? String(updatedFields.summary).trim()
+                : com.summary,
+            image:
+              updatedFields?.image !== undefined
+                ? String(updatedFields.image).trim()
+                : com.image,
+            tasks: nextTasks,
+            skills: nextSkills,
+          };
+        }),
+      }));
+    },
+    [commitState]
+  );
+
+  const deleteCommittee = useCallback(
+    (id) => {
+      return commitState((prev) => ({
+        ...prev,
+        committees: prev.committees.filter(
+          (com) => String(com.id) !== String(id)
+        ),
+      }));
+    },
+    [commitState]
+  );
+
+  const saveDefaultSections = useCallback(
+    (defaultActivities, defaultCommittees) => {
+      return commitState((prev) => ({
+        ...prev,
+        activities: defaultActivities,
+        committees: defaultCommittees,
       }));
     },
     [commitState]
@@ -437,6 +612,13 @@ export function SiteProvider({ children }) {
         deleteUpcomingEvent,
         addGalleryItem,
         deleteGalleryItem,
+        addActivity,
+        updateActivity,
+        deleteActivity,
+        addCommittee,
+        updateCommittee,
+        deleteCommittee,
+        saveDefaultSections,
         addJoinRequest,
         updateRequestStatus,
         resetToDefault,

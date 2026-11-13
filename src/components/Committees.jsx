@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { useSite } from "../context/SiteContext";
 
-const DEFAULT_COMMITTEES = [
+export const DEFAULT_COMMITTEES = [
   {
     id: "com-programs",
     title: "لجنة البرامج والتدريب",
-    icon: "bi-journal-check",
     summary: "تصميم البرامج الكشفية، المعسكرات، والورش التدريبية للأعضاء.",
+    image:
+      "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=900&q=80",
     tasks: [
       "إعداد خطط المعسكرات والرحلات والأنشطة الأسبوعية",
       "تقديم تدريبات المهارات الكشفية والقيادية للجوالين الجدد",
@@ -17,8 +18,9 @@ const DEFAULT_COMMITTEES = [
   {
     id: "com-service",
     title: "لجنة خدمة وتنمية المجتمع",
-    icon: "bi-globe-americas",
     summary: "قيادة المبادرات التطوعية والعمل الخيري لخدمة الكلية والمجتمع.",
+    image:
+      "https://images.unsplash.com/photo-1559027615-cd4628902d4a?w=900&q=80",
     tasks: [
       "تنظيم حملات التوعية والمبادرات المجتمعية والخيرية",
       "التنسيق مع الجهات والفرق التطوعية لتنفيذ المشاريع الميدانية",
@@ -29,8 +31,9 @@ const DEFAULT_COMMITTEES = [
   {
     id: "com-media",
     title: "لجنة الإعلام والتوثيق",
-    icon: "bi-camera-reels-fill",
     summary: "توثيق لحظات العشيرة وصناعة المحتوى البصري والرقمي بأسلوب جذاب.",
+    image:
+      "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=900&q=80",
     tasks: [
       "تغطية المعسكرات والفعاليات بالصور والفيديو والتقارير",
       "تصميم منشورات وهوية بصرية تعكس روح العشيرة",
@@ -41,8 +44,9 @@ const DEFAULT_COMMITTEES = [
   {
     id: "com-logistics",
     title: "لجنة التنظيم والعهدة",
-    icon: "bi-box-seam-fill",
     summary: "تجهيز الميدان، إدارة المعدات الكشفية، وضمان انسيابية الفعاليات.",
+    image:
+      "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=900&q=80",
     tasks: [
       "حصر وصيانة وتجهيز العهدة والمعدات قبل وبعد الفعاليات",
       "تنظيم استقبال المشاركين وترتيب مساحات العمل والميدان",
@@ -92,10 +96,13 @@ export default function Committees({ onOpenJoin }) {
               border: "1px solid rgba(255, 193, 7, 0.45)",
             }}
           >
-            🎯 اختر مكانك المناسب
+            اختر مكانك المناسب
           </span>
           <h2 className="fw-bold text-white mb-2">اللجان النوعية</h2>
-          <p className="text-light opacity-75 mx-auto mb-0" style={{ maxWidth: "600px" }}>
+          <p
+            className="text-light opacity-75 mx-auto mb-0"
+            style={{ maxWidth: "600px" }}
+          >
             كل لجنة ليها دور واضح ومهارات بتصقلها—استعرض المهام واختر اللجنة الأقرب لشغفك
           </p>
         </div>
@@ -104,34 +111,44 @@ export default function Committees({ onOpenJoin }) {
           {committees.map((com, idx) => (
             <div key={com?.id || idx} className="col-12 col-md-6 col-lg-3">
               <div
-                className="card h-100 rounded-4 shadow-lg"
+                className="card h-100 rounded-4 overflow-hidden shadow-lg"
                 style={{
                   backgroundColor: "#111b2e",
                   border: "1px solid rgba(255, 193, 7, 0.28)",
                   color: "#ffffff",
                 }}
               >
-                <div className="card-body p-4 d-flex flex-column">
-                  <div className="d-flex align-items-center justify-content-between mb-3">
-                    <div
-                      className="d-inline-flex align-items-center justify-content-center rounded-circle fw-bold"
-                      style={{
-                        width: "46px",
-                        height: "46px",
-                        backgroundColor: "#ffc107",
-                        color: "#0b111e",
-                        fontSize: "1.2rem",
-                      }}
-                    >
-                      <i className={`bi ${com?.icon || "bi-people-fill"}`}></i>
+                <div
+                  className="position-relative"
+                  style={{ height: "170px", backgroundColor: "#0a101d" }}
+                >
+                  {com?.image ? (
+                    <img
+                      src={com.image}
+                      alt={com?.title || "لجنة"}
+                      className="w-100 h-100"
+                      style={{ objectFit: "cover" }}
+                    />
+                  ) : (
+                    <div className="w-100 h-100 d-flex align-items-center justify-content-center text-secondary small">
+                      لا توجد صورة
                     </div>
+                  )}
+                  <span
+                    className="badge rounded-pill px-3 py-2 position-absolute top-0 start-0 m-3 fw-bold small"
+                    style={{
+                      backgroundColor: "#ffc107",
+                      color: "#0b111e",
+                    }}
+                  >
+                    0{idx + 1}
+                  </span>
+                </div>
 
-                    <span className="fw-bold small" style={{ color: "#ffc107" }}>
-                      0{idx + 1}
-                    </span>
-                  </div>
-
-                  <h5 className="fw-bold text-white mb-2">{com?.title || "لجنة"}</h5>
+                <div className="card-body p-4 d-flex flex-column">
+                  <h5 className="fw-bold text-white mb-2">
+                    {com?.title || "لجنة"}
+                  </h5>
                   <p className="text-light opacity-75 small lh-lg flex-grow-1 mb-3">
                     {com?.summary || ""}
                   </p>
@@ -141,7 +158,6 @@ export default function Committees({ onOpenJoin }) {
                     onClick={() => setActiveCommittee(com)}
                     className="btn btn-warning text-dark fw-bold btn-sm rounded-pill w-100 py-2"
                   >
-                    <i className="bi bi-eye-fill me-1"></i>
                     المهام والمهارات
                   </button>
                 </div>
@@ -161,16 +177,26 @@ export default function Committees({ onOpenJoin }) {
               onClick={(e) => e.stopPropagation()}
             >
               <div
-                className="modal-content rounded-4"
+                className="modal-content rounded-4 overflow-hidden"
                 style={{
                   backgroundColor: "#10192b",
                   color: "#ffffff",
                   border: "1px solid rgba(255, 193, 7, 0.45)",
                 }}
               >
+                {activeCommittee?.image && (
+                  <div style={{ height: "190px" }}>
+                    <img
+                      src={activeCommittee.image}
+                      alt={activeCommittee?.title || ""}
+                      className="w-100 h-100"
+                      style={{ objectFit: "cover" }}
+                    />
+                  </div>
+                )}
+
                 <div className="modal-header border-secondary">
                   <h5 className="modal-title fw-bold" style={{ color: "#ffc107" }}>
-                    <i className={`bi ${activeCommittee?.icon || "bi-people-fill"} me-2`}></i>
                     {activeCommittee?.title || ""}
                   </h5>
                   <button
@@ -188,7 +214,7 @@ export default function Committees({ onOpenJoin }) {
                   )}
 
                   <h6 className="fw-bold mb-2" style={{ color: "#ffc107" }}>
-                    <i className="bi bi-list-check me-1"></i> أهم المهام:
+                    أهم المهام:
                   </h6>
                   <ul className="text-light opacity-85 small mb-4 pe-3">
                     {tasks.map((task, idx) => (
@@ -199,7 +225,7 @@ export default function Committees({ onOpenJoin }) {
                   </ul>
 
                   <h6 className="fw-bold mb-2" style={{ color: "#ffc107" }}>
-                    <i className="bi bi-lightning-charge-fill me-1"></i> المهارات المكتسبة:
+                    المهارات المكتسبة:
                   </h6>
                   <div className="d-flex flex-wrap gap-2 mb-4">
                     {skills.map((skill, idx) => (

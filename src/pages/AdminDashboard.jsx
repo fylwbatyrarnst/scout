@@ -2,37 +2,42 @@ import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useSite } from "../context/SiteContext";
 import { pickFileFromDevice } from "../lib/imageFile";
+import { DEFAULT_ACTIVITIES } from "../components/Activities";
+import { DEFAULT_COMMITTEES } from "../components/Committees";
 
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "rover2026";
-const MAX_IMAGE_DATA_URL_CHARS = 28 * 1024; // ~28 KB كحد أقصى لصورة Base64 واحدة
+const MAX_IMAGE_DATA_URL_CHARS = 28 * 1024;
 
 const GALLERY_TEMPLATES = [
   {
-    label: "⛺ معسكر كشفي",
+    label: "معسكر كشفي",
     title: "معسكر خلاء ومغامرة",
-    icon: "⛺",
+    icon: "",
     shortDesc: "تدريب عملي على التخييم ومهارات الخلاء والعمل الجماعي.",
     details:
       "معسكر كشفي يهدف لتنمية الاعتماد على النفس والقيادة من خلال نصب الخيام، العقد والربطات، الإسعافات الأولية، والأنشطة الميدانية.",
-    image: "https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=1000&q=80",
+    image:
+      "https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=1000&q=80",
   },
   {
-    label: "❤️ يوم خير",
+    label: "يوم خير",
     title: "يوم الخير والمبادرات",
-    icon: "❤️",
+    icon: "",
     shortDesc: "أنشطة تطوعية ومبادرات لخدمة المجتمع داخل الكلية وخارجها.",
     details:
       "يوم مخصص للعمل التطوعي وخدمة المجتمع وتنظيم المبادرات الخيرية ونشر روح العطاء بين الجوالين والطلاب.",
-    image: "https://images.unsplash.com/photo-1593113598332-cd288d649433?w=1000&q=80",
+    image:
+      "https://images.unsplash.com/photo-1593113598332-cd288d649433?w=1000&q=80",
   },
   {
-    label: "🌙 إفطار وحفل",
+    label: "إفطار وحفل",
     title: "إفطار العشيرة السنوي",
-    icon: "🌙",
+    icon: "",
     shortDesc: "لقاء ودي يجمع أعضاء العشيرة ولجانها في أجواء أخوية.",
     details:
       "تجمع سنوي لأفراد العشيرة لتعزيز روح الأخوة والتواصل بين القيادات والجوالين الجدد مع فقرات ترفيهية وكشفية.",
-    image: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=1000&q=80",
+    image:
+      "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=1000&q=80",
   },
 ];
 
@@ -43,6 +48,21 @@ const EMPTY_EVENT = {
   location: "كلية العلوم - جامعة عين شمس",
   description: "",
   image: "",
+};
+
+const EMPTY_ACTIVITY = {
+  badge: "مجال كشفي",
+  title: "",
+  description: "",
+  image: "",
+};
+
+const EMPTY_COMMITTEE = {
+  title: "",
+  summary: "",
+  image: "",
+  tasksText: "",
+  skillsText: "",
 };
 
 export default function AdminDashboard() {
@@ -66,15 +86,26 @@ export default function AdminDashboard() {
     deleteUpcomingEvent,
     addGalleryItem,
     deleteGalleryItem,
+    addActivity,
+    updateActivity,
+    deleteActivity,
+    addCommittee,
+    updateCommittee,
+    deleteCommittee,
+    saveDefaultSections,
     updateRequestStatus,
     resetToDefault,
   } = useSite();
 
-  const [logoInput, setLogoInput] = useState(siteData.logoUrl || "/rover-logo.svg");
+  const [logoInput, setLogoInput] = useState(
+    siteData.logoUrl || "/rover-logo.svg"
+  );
   const [logoSaved, setLogoSaved] = useState(false);
   const [logoError, setLogoError] = useState("");
 
-  const [heroBgInput, setHeroBgInput] = useState(siteData.heroBackgroundUrl || "");
+  const [heroBgInput, setHeroBgInput] = useState(
+    siteData.heroBackgroundUrl || ""
+  );
   const [heroBgSaved, setHeroBgSaved] = useState(false);
   const [heroBgError, setHeroBgError] = useState("");
 
@@ -85,12 +116,22 @@ export default function AdminDashboard() {
 
   const [newGallery, setNewGallery] = useState({
     title: "",
-    icon: "🏕️",
+    icon: "",
     shortDesc: "",
     details: "",
     image: "",
   });
   const [galleryNotice, setGalleryNotice] = useState("");
+
+  const [newActivityForm, setNewActivityForm] = useState(EMPTY_ACTIVITY);
+  const [editingActivityId, setEditingActivityId] = useState(null);
+  const [editActivityForm, setEditActivityForm] = useState(EMPTY_ACTIVITY);
+  const [activityNotice, setActivityNotice] = useState("");
+
+  const [newCommitteeForm, setNewCommitteeForm] = useState(EMPTY_COMMITTEE);
+  const [editingCommitteeId, setEditingCommitteeId] = useState(null);
+  const [editCommitteeForm, setEditCommitteeForm] = useState(EMPTY_COMMITTEE);
+  const [committeeNotice, setCommitteeNotice] = useState("");
 
   const [requestNotice, setRequestNotice] = useState("");
 
@@ -112,7 +153,10 @@ export default function AdminDashboard() {
 
     try {
       const base64 = await pickFileFromDevice(file, maxWidth, quality);
-      if (typeof base64 === "string" && base64.length > MAX_IMAGE_DATA_URL_CHARS) {
+      if (
+        typeof base64 === "string" &&
+        base64.length > MAX_IMAGE_DATA_URL_CHARS
+      ) {
         const approxKb = (base64.length / 1024).toFixed(1);
         const msg = `حجم الصورة بعد الضغط (${approxKb} KB) كبير على حد 100 KB في JSONBin المجاني. الأفضل استخدام رابط صورة مباشر (URL) أو تقليل الصور المخزنة.`;
         if (onErrorMsg) {
@@ -141,7 +185,7 @@ export default function AdminDashboard() {
     setGalleryNotice("");
     setNewGallery({
       title: tpl.title,
-      icon: tpl.icon,
+      icon: tpl.icon || "",
       shortDesc: tpl.shortDesc,
       details: tpl.details,
       image: tpl.image,
@@ -183,8 +227,8 @@ export default function AdminDashboard() {
     setEditingEventId(null);
     setEventNotice(
       res?.ok === false
-        ? `⚠️ تم التحديث محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "✅ تم تحديث بيانات الحدث!"
+        ? `تم التحديث محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "تم تحديث بيانات الحدث."
     );
     setTimeout(() => setEventNotice(""), 4000);
   };
@@ -197,8 +241,8 @@ export default function AdminDashboard() {
     }
     setEventNotice(
       res?.ok === false
-        ? `⚠️ تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "✅ تمت إضافة الحدث الجديد!"
+        ? `تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "تمت إضافة الحدث الجديد."
     );
     setTimeout(() => setEventNotice(""), 4000);
   };
@@ -207,8 +251,8 @@ export default function AdminDashboard() {
     const res = await deleteUpcomingEvent(id);
     setEventNotice(
       res?.ok === false
-        ? `⚠️ تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
-        : "✅ تم حذف الحدث."
+        ? `تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
+        : "تم حذف الحدث."
     );
     setTimeout(() => setEventNotice(""), 4000);
   };
@@ -219,7 +263,7 @@ export default function AdminDashboard() {
     if (res?.ok !== false) {
       setNewGallery({
         title: "",
-        icon: "🏕️",
+        icon: "",
         shortDesc: "",
         details: "",
         image: "",
@@ -227,8 +271,8 @@ export default function AdminDashboard() {
     }
     setGalleryNotice(
       res?.ok === false
-        ? `⚠️ تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "✅ تمت إضافة الفعالية للمعرض!"
+        ? `تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "تمت إضافة الفعالية للمعرض."
     );
     setTimeout(() => setGalleryNotice(""), 4000);
   };
@@ -237,10 +281,126 @@ export default function AdminDashboard() {
     const res = await deleteGalleryItem(id);
     setGalleryNotice(
       res?.ok === false
-        ? `⚠️ تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
-        : "✅ تم حذف الفعالية من المعرض."
+        ? `تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
+        : "تم حذف الفعالية من المعرض."
     );
     setTimeout(() => setGalleryNotice(""), 4000);
+  };
+
+  const handleAddActivity = async (e) => {
+    e.preventDefault();
+    const res = await addActivity(newActivityForm);
+    if (res?.ok !== false) {
+      setNewActivityForm(EMPTY_ACTIVITY);
+    }
+    setActivityNotice(
+      res?.ok === false
+        ? `تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "تمت إضافة مجال النشاط."
+    );
+    setTimeout(() => setActivityNotice(""), 4000);
+  };
+
+  const startEditActivity = (act) => {
+    setActivityNotice("");
+    setEditingActivityId(act.id);
+    setEditActivityForm({
+      badge: act.badge || "مجال كشفي",
+      title: act.title || "",
+      description: act.description || "",
+      image: act.image || "",
+    });
+  };
+
+  const handleSaveEditedActivity = async (e) => {
+    e.preventDefault();
+    const res = await updateActivity(editingActivityId, editActivityForm);
+    setEditingActivityId(null);
+    setActivityNotice(
+      res?.ok === false
+        ? `تم التحديث محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "تم تحديث مجال النشاط."
+    );
+    setTimeout(() => setActivityNotice(""), 4000);
+  };
+
+  const handleDeleteActivity = async (id) => {
+    const res = await deleteActivity(id);
+    setActivityNotice(
+      res?.ok === false
+        ? `تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
+        : "تم حذف مجال النشاط."
+    );
+    setTimeout(() => setActivityNotice(""), 4000);
+  };
+
+  const handleAddCommittee = async (e) => {
+    e.preventDefault();
+    const res = await addCommittee(newCommitteeForm);
+    if (res?.ok !== false) {
+      setNewCommitteeForm(EMPTY_COMMITTEE);
+    }
+    setCommitteeNotice(
+      res?.ok === false
+        ? `تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "تمت إضافة اللجنة النوعية."
+    );
+    setTimeout(() => setCommitteeNotice(""), 4000);
+  };
+
+  const startEditCommittee = (com) => {
+    setCommitteeNotice("");
+    setEditingCommitteeId(com.id);
+    setEditCommitteeForm({
+      title: com.title || "",
+      summary: com.summary || "",
+      image: com.image || "",
+      tasksText: Array.isArray(com.tasks) ? com.tasks.join("\n") : "",
+      skillsText: Array.isArray(com.skills) ? com.skills.join("، ") : "",
+    });
+  };
+
+  const handleSaveEditedCommittee = async (e) => {
+    e.preventDefault();
+    const res = await updateCommittee(editingCommitteeId, editCommitteeForm);
+    setEditingCommitteeId(null);
+    setCommitteeNotice(
+      res?.ok === false
+        ? `تم التحديث محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "تم تحديث بيانات اللجنة."
+    );
+    setTimeout(() => setCommitteeNotice(""), 4000);
+  };
+
+  const handleDeleteCommittee = async (id) => {
+    const res = await deleteCommittee(id);
+    setCommitteeNotice(
+      res?.ok === false
+        ? `تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
+        : "تم حذف اللجنة."
+    );
+    setTimeout(() => setCommitteeNotice(""), 4000);
+  };
+
+  const handleLoadDefaults = async (sectionType) => {
+    const res = await saveDefaultSections(
+      sectionType === "activities" || sectionType === "all"
+        ? DEFAULT_ACTIVITIES
+        : siteData.activities,
+      sectionType === "committees" || sectionType === "all"
+        ? DEFAULT_COMMITTEES
+        : siteData.committees
+    );
+    const msg =
+      res?.ok === false
+        ? `تم التحميل محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "تم تحميل البيانات الافتراضية بالصور.";
+    if (sectionType === "activities") setActivityNotice(msg);
+    else setCommitteeNotice(msg);
+    setTimeout(() => {
+      setActivityNotice("");
+      setCommitteeNotice("");
+    }, 4000);
   };
 
   const handleSaveLogo = async (e) => {
@@ -276,7 +436,9 @@ export default function AdminDashboard() {
   const handleUpdateStatus = async (id, status) => {
     const res = await updateRequestStatus(id, status);
     if (res?.ok === false) {
-      setRequestNotice(`⚠️ تم التحديث محلياً وتعذر حفظه على السحابة: ${res.cloudError}`);
+      setRequestNotice(
+        `تم التحديث محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
+      );
       setTimeout(() => setRequestNotice(""), 4000);
     }
   };
@@ -286,7 +448,6 @@ export default function AdminDashboard() {
       <div className="min-vh-100 d-flex align-items-center justify-content-center bg-black">
         <div className="card rover-card p-4 shadow-lg" style={{ width: "380px" }}>
           <div className="text-center mb-3">
-            <span className="display-4">🔐</span>
             <h4 className="fw-bold text-warning mt-2">لوحة تحكم العشيرة</h4>
             <p className="text-secondary small">أدخل كلمة المرور للمتابعة</p>
           </div>
@@ -299,7 +460,11 @@ export default function AdminDashboard() {
               onChange={(e) => setPasswordInput(e.target.value)}
               required
             />
-            {error && <div className="alert alert-danger py-2 small text-center">{error}</div>}
+            {error && (
+              <div className="alert alert-danger py-2 small text-center">
+                {error}
+              </div>
+            )}
             <button type="submit" className="btn btn-gold w-100 mb-2">
               دخول
             </button>
@@ -312,12 +477,22 @@ export default function AdminDashboard() {
     );
   }
 
+  const displayedActivities =
+    Array.isArray(siteData.activities) && siteData.activities.length > 0
+      ? siteData.activities
+      : DEFAULT_ACTIVITIES;
+
+  const displayedCommittees =
+    Array.isArray(siteData.committees) && siteData.committees.length > 0
+      ? siteData.committees
+      : DEFAULT_COMMITTEES;
+
   return (
     <div className="min-vh-100 bg-black text-light">
       <nav className="navbar navbar-dark bg-black px-4 py-3 border-bottom border-warning border-opacity-25">
         <div className="d-flex align-items-center gap-3 flex-wrap">
           <span className="navbar-brand fw-bold text-warning mb-0">
-            ⚜️ لوحة تحكم جوالة علوم عين شمس
+            لوحة تحكم جوالة علوم عين شمس
           </span>
           {isCloudEnabled ? (
             <span className="badge bg-success px-3 py-2">
@@ -363,41 +538,73 @@ export default function AdminDashboard() {
           <li className="nav-item">
             <button
               className={`nav-link ${
-                activeTab === "event" ? "btn-gold text-dark" : "rover-card text-light"
+                activeTab === "event"
+                  ? "btn-gold text-dark"
+                  : "rover-card text-light"
               }`}
               onClick={() => setActiveTab("event")}
             >
-              📅 الأحداث القادمة ({siteData.upcomingEvents.length})
+              الأحداث القادمة ({siteData.upcomingEvents.length})
             </button>
           </li>
           <li className="nav-item">
             <button
               className={`nav-link ${
-                activeTab === "gallery" ? "btn-gold text-dark" : "rover-card text-light"
+                activeTab === "activities"
+                  ? "btn-gold text-dark"
+                  : "rover-card text-light"
+              }`}
+              onClick={() => setActiveTab("activities")}
+            >
+              مجالات الأنشطة ({displayedActivities.length})
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className={`nav-link ${
+                activeTab === "committees"
+                  ? "btn-gold text-dark"
+                  : "rover-card text-light"
+              }`}
+              onClick={() => setActiveTab("committees")}
+            >
+              اللجان النوعية ({displayedCommittees.length})
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className={`nav-link ${
+                activeTab === "gallery"
+                  ? "btn-gold text-dark"
+                  : "rover-card text-light"
               }`}
               onClick={() => setActiveTab("gallery")}
             >
-              🖼️ إدارة المعرض ({siteData.gallery.length})
+              إدارة المعرض ({siteData.gallery.length})
             </button>
           </li>
           <li className="nav-item">
             <button
               className={`nav-link ${
-                activeTab === "requests" ? "btn-gold text-dark" : "rover-card text-light"
+                activeTab === "requests"
+                  ? "btn-gold text-dark"
+                  : "rover-card text-light"
               }`}
               onClick={() => setActiveTab("requests")}
             >
-              📩 طلبات الانضمام ({siteData.joinRequests.length})
+              طلبات الانضمام ({siteData.joinRequests.length})
             </button>
           </li>
           <li className="nav-item">
             <button
               className={`nav-link ${
-                activeTab === "branding" ? "btn-gold text-dark" : "rover-card text-light"
+                activeTab === "branding"
+                  ? "btn-gold text-dark"
+                  : "rover-card text-light"
               }`}
               onClick={() => setActiveTab("branding")}
             >
-              ⚜️ الشعار وخلفية الهيرو
+              الشعار وخلفية الهيرو
             </button>
           </li>
         </ul>
@@ -418,46 +625,66 @@ export default function AdminDashboard() {
                         type="checkbox"
                         checked={editEventForm.active}
                         onChange={(e) =>
-                          setEditEventForm({ ...editEventForm, active: e.target.checked })
+                          setEditEventForm({
+                            ...editEventForm,
+                            active: e.target.checked,
+                          })
                         }
                       />
-                      <label className="form-check-label fw-bold">إظهار الحدث في الكتاب</label>
+                      <label className="form-check-label fw-bold">
+                        إظهار الحدث في الكتاب
+                      </label>
                     </div>
 
                     <div className="mb-2">
-                      <label className="form-label small text-warning">اسم الحدث</label>
+                      <label className="form-label small text-warning">
+                        اسم الحدث
+                      </label>
                       <input
                         type="text"
                         className="form-control bg-dark text-white border-secondary"
                         required
                         value={editEventForm.title}
                         onChange={(e) =>
-                          setEditEventForm({ ...editEventForm, title: e.target.value })
+                          setEditEventForm({
+                            ...editEventForm,
+                            title: e.target.value,
+                          })
                         }
                       />
                     </div>
 
                     <div className="mb-2">
-                      <label className="form-label small text-warning">التاريخ والوقت</label>
+                      <label className="form-label small text-warning">
+                        التاريخ والوقت
+                      </label>
                       <input
                         type="datetime-local"
                         className="form-control bg-dark text-white border-secondary"
                         value={editEventForm.date}
                         onChange={(e) =>
-                          setEditEventForm({ ...editEventForm, date: e.target.value })
+                          setEditEventForm({
+                            ...editEventForm,
+                            date: e.target.value,
+                          })
                         }
                       />
                     </div>
 
                     <div className="mb-2">
-                      <label className="form-label small text-warning">المكان</label>
+                      <label className="form-label small text-warning">
+                        المكان
+                      </label>
                       <input
                         type="text"
                         className="form-control bg-dark text-white border-secondary"
                         required
                         value={editEventForm.location}
                         onChange={(e) =>
-                          setEditEventForm({ ...editEventForm, location: e.target.value })
+                          setEditEventForm({
+                            ...editEventForm,
+                            location: e.target.value,
+                          })
                         }
                       />
                     </div>
@@ -472,7 +699,10 @@ export default function AdminDashboard() {
                         placeholder="https://..."
                         value={editEventForm.image}
                         onChange={(e) =>
-                          setEditEventForm({ ...editEventForm, image: e.target.value })
+                          setEditEventForm({
+                            ...editEventForm,
+                            image: e.target.value,
+                          })
                         }
                       />
                       <input
@@ -482,7 +712,8 @@ export default function AdminDashboard() {
                         onChange={(e) =>
                           handleFileChange(
                             e,
-                            (img) => setEditEventForm({ ...editEventForm, image: img }),
+                            (img) =>
+                              setEditEventForm({ ...editEventForm, image: img }),
                             (msg) => setEventNotice(msg)
                           )
                         }
@@ -501,14 +732,19 @@ export default function AdminDashboard() {
                     )}
 
                     <div className="mb-3">
-                      <label className="form-label small text-warning">وصف الحدث</label>
+                      <label className="form-label small text-warning">
+                        وصف الحدث
+                      </label>
                       <textarea
                         className="form-control bg-dark text-white border-secondary"
                         rows="3"
                         required
                         value={editEventForm.description}
                         onChange={(e) =>
-                          setEditEventForm({ ...editEventForm, description: e.target.value })
+                          setEditEventForm({
+                            ...editEventForm,
+                            description: e.target.value,
+                          })
                         }
                       ></textarea>
                     </div>
@@ -534,7 +770,10 @@ export default function AdminDashboard() {
                         type="checkbox"
                         checked={newEventForm.active}
                         onChange={(e) =>
-                          setNewEventForm({ ...newEventForm, active: e.target.checked })
+                          setNewEventForm({
+                            ...newEventForm,
+                            active: e.target.checked,
+                          })
                         }
                       />
                       <label className="form-check-label fw-bold">
@@ -543,7 +782,9 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="mb-2">
-                      <label className="form-label small text-warning">اسم الحدث</label>
+                      <label className="form-label small text-warning">
+                        اسم الحدث
+                      </label>
                       <input
                         type="text"
                         className="form-control bg-dark text-white border-secondary"
@@ -551,25 +792,35 @@ export default function AdminDashboard() {
                         required
                         value={newEventForm.title}
                         onChange={(e) =>
-                          setNewEventForm({ ...newEventForm, title: e.target.value })
+                          setNewEventForm({
+                            ...newEventForm,
+                            title: e.target.value,
+                          })
                         }
                       />
                     </div>
 
                     <div className="mb-2">
-                      <label className="form-label small text-warning">التاريخ والوقت</label>
+                      <label className="form-label small text-warning">
+                        التاريخ والوقت
+                      </label>
                       <input
                         type="datetime-local"
                         className="form-control bg-dark text-white border-secondary"
                         value={newEventForm.date}
                         onChange={(e) =>
-                          setNewEventForm({ ...newEventForm, date: e.target.value })
+                          setNewEventForm({
+                            ...newEventForm,
+                            date: e.target.value,
+                          })
                         }
                       />
                     </div>
 
                     <div className="mb-2">
-                      <label className="form-label small text-warning">المكان</label>
+                      <label className="form-label small text-warning">
+                        المكان
+                      </label>
                       <input
                         type="text"
                         className="form-control bg-dark text-white border-secondary"
@@ -577,7 +828,10 @@ export default function AdminDashboard() {
                         required
                         value={newEventForm.location}
                         onChange={(e) =>
-                          setNewEventForm({ ...newEventForm, location: e.target.value })
+                          setNewEventForm({
+                            ...newEventForm,
+                            location: e.target.value,
+                          })
                         }
                       />
                     </div>
@@ -592,7 +846,10 @@ export default function AdminDashboard() {
                         placeholder="https://..."
                         value={newEventForm.image}
                         onChange={(e) =>
-                          setNewEventForm({ ...newEventForm, image: e.target.value })
+                          setNewEventForm({
+                            ...newEventForm,
+                            image: e.target.value,
+                          })
                         }
                       />
                       <input
@@ -603,7 +860,8 @@ export default function AdminDashboard() {
                         onChange={(e) =>
                           handleFileChange(
                             e,
-                            (img) => setNewEventForm({ ...newEventForm, image: img }),
+                            (img) =>
+                              setNewEventForm({ ...newEventForm, image: img }),
                             (msg) => setEventNotice(msg)
                           )
                         }
@@ -622,7 +880,9 @@ export default function AdminDashboard() {
                     )}
 
                     <div className="mb-3">
-                      <label className="form-label small text-warning">وصف الحدث</label>
+                      <label className="form-label small text-warning">
+                        وصف الحدث
+                      </label>
                       <textarea
                         className="form-control bg-dark text-white border-secondary"
                         rows="3"
@@ -630,7 +890,10 @@ export default function AdminDashboard() {
                         required
                         value={newEventForm.description}
                         onChange={(e) =>
-                          setNewEventForm({ ...newEventForm, description: e.target.value })
+                          setNewEventForm({
+                            ...newEventForm,
+                            description: e.target.value,
+                          })
                         }
                       ></textarea>
                     </div>
@@ -666,7 +929,11 @@ export default function AdminDashboard() {
                             src={ev.image}
                             alt={ev.title}
                             className="rounded-2 border border-warning"
-                            style={{ width: "68px", height: "68px", objectFit: "cover" }}
+                            style={{
+                              width: "68px",
+                              height: "68px",
+                              objectFit: "cover",
+                            }}
                           />
                         )}
                         <div>
@@ -674,13 +941,17 @@ export default function AdminDashboard() {
                             <strong className="text-warning">{ev.title}</strong>
                             <span
                               className={`badge ${
-                                ev.active !== false ? "bg-success" : "bg-secondary"
+                                ev.active !== false
+                                  ? "bg-success"
+                                  : "bg-secondary"
                               }`}
                             >
                               {ev.active !== false ? "ظاهر" : "مخفي"}
                             </span>
                           </div>
-                          <div className="small text-secondary">{ev.location}</div>
+                          <div className="small text-secondary">
+                            {ev.location}
+                          </div>
                           <div className="small text-light opacity-75">
                             {ev.shortDesc || ev.description}
                           </div>
@@ -711,11 +982,671 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {activeTab === "activities" && (
+          <div className="row g-4">
+            <div className="col-lg-5">
+              <div className="card rover-card p-4">
+                <div className="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
+                  <h5 className="fw-bold text-warning mb-0">
+                    {editingActivityId
+                      ? "تعديل مجال نشاط"
+                      : "إضافة مجال نشاط جديد"}
+                  </h5>
+                  {siteData.activities.length === 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-gold btn-sm"
+                      onClick={() => handleLoadDefaults("activities")}
+                    >
+                      اعتماد الافتراضيات
+                    </button>
+                  )}
+                </div>
+
+                {editingActivityId ? (
+                  <form onSubmit={handleSaveEditedActivity}>
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        اسم المجال
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary"
+                        required
+                        value={editActivityForm.title}
+                        onChange={(e) =>
+                          setEditActivityForm({
+                            ...editActivityForm,
+                            title: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        تصنيف قصير (Badge)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary"
+                        value={editActivityForm.badge}
+                        onChange={(e) =>
+                          setEditActivityForm({
+                            ...editActivityForm,
+                            badge: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        رابط صورة مباشر (URL) أو ملف صغير
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary mb-2"
+                        placeholder="https://..."
+                        value={editActivityForm.image}
+                        onChange={(e) =>
+                          setEditActivityForm({
+                            ...editActivityForm,
+                            image: e.target.value,
+                          })
+                        }
+                      />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="form-control bg-dark text-white border-secondary"
+                        onChange={(e) =>
+                          handleFileChange(
+                            e,
+                            (img) =>
+                              setEditActivityForm({
+                                ...editActivityForm,
+                                image: img,
+                              }),
+                            (msg) => setActivityNotice(msg)
+                          )
+                        }
+                      />
+                    </div>
+
+                    {editActivityForm.image && (
+                      <div className="mb-2 text-center">
+                        <img
+                          src={editActivityForm.image}
+                          alt="معاينة"
+                          className="img-fluid rounded-3 border border-warning"
+                          style={{ maxHeight: "110px", objectFit: "cover" }}
+                        />
+                      </div>
+                    )}
+
+                    <div className="mb-3">
+                      <label className="form-label small text-warning">
+                        الوصف
+                      </label>
+                      <textarea
+                        className="form-control bg-dark text-white border-secondary"
+                        rows="3"
+                        required
+                        value={editActivityForm.description}
+                        onChange={(e) =>
+                          setEditActivityForm({
+                            ...editActivityForm,
+                            description: e.target.value,
+                          })
+                        }
+                      ></textarea>
+                    </div>
+
+                    <div className="d-flex gap-2">
+                      <button type="submit" className="btn btn-gold flex-grow-1">
+                        حفظ التعديل
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline-gold"
+                        onClick={() => setEditingActivityId(null)}
+                      >
+                        إلغاء
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <form onSubmit={handleAddActivity}>
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        اسم المجال
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary"
+                        placeholder="مثال: المعسكرات الكشفية"
+                        required
+                        value={newActivityForm.title}
+                        onChange={(e) =>
+                          setNewActivityForm({
+                            ...newActivityForm,
+                            title: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        تصنيف قصير (Badge)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary"
+                        placeholder="مثال: خلاء ومغامرة"
+                        value={newActivityForm.badge}
+                        onChange={(e) =>
+                          setNewActivityForm({
+                            ...newActivityForm,
+                            badge: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        رابط صورة مباشر (URL) أو ملف صغير
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary mb-2"
+                        placeholder="https://..."
+                        value={newActivityForm.image}
+                        onChange={(e) =>
+                          setNewActivityForm({
+                            ...newActivityForm,
+                            image: e.target.value,
+                          })
+                        }
+                      />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="form-control bg-dark text-white border-secondary"
+                        onChange={(e) =>
+                          handleFileChange(
+                            e,
+                            (img) =>
+                              setNewActivityForm({
+                                ...newActivityForm,
+                                image: img,
+                              }),
+                            (msg) => setActivityNotice(msg)
+                          )
+                        }
+                      />
+                    </div>
+
+                    {newActivityForm.image && (
+                      <div className="mb-2 text-center">
+                        <img
+                          src={newActivityForm.image}
+                          alt="معاينة"
+                          className="img-fluid rounded-3 border border-warning"
+                          style={{ maxHeight: "110px", objectFit: "cover" }}
+                        />
+                      </div>
+                    )}
+
+                    <div className="mb-3">
+                      <label className="form-label small text-warning">
+                        الوصف
+                      </label>
+                      <textarea
+                        className="form-control bg-dark text-white border-secondary"
+                        rows="3"
+                        placeholder="اشرح طبيعة هذا المجال..."
+                        required
+                        value={newActivityForm.description}
+                        onChange={(e) =>
+                          setNewActivityForm({
+                            ...newActivityForm,
+                            description: e.target.value,
+                          })
+                        }
+                      ></textarea>
+                    </div>
+
+                    <button type="submit" className="btn btn-gold w-100">
+                      + إضافة مجال نشاط
+                    </button>
+                  </form>
+                )}
+
+                {activityNotice && (
+                  <div className="text-warning small fw-bold text-center mt-3">
+                    {activityNotice}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="col-lg-7">
+              <div className="card rover-card p-4">
+                <h5 className="fw-bold text-warning mb-3">
+                  مجالات الأنشطة الحالية ({displayedActivities.length})
+                </h5>
+                <div className="d-flex flex-column gap-3">
+                  {displayedActivities.map((act) => (
+                    <div
+                      key={act.id}
+                      className="p-3 rounded-3 bg-dark border border-secondary d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-3"
+                    >
+                      <div className="d-flex align-items-center gap-3">
+                        {act.image && (
+                          <img
+                            src={act.image}
+                            alt={act.title}
+                            className="rounded-2 border border-warning"
+                            style={{
+                              width: "68px",
+                              height: "68px",
+                              objectFit: "cover",
+                            }}
+                          />
+                        )}
+                        <div>
+                          <div className="d-flex align-items-center gap-2 flex-wrap">
+                            <strong className="text-warning">{act.title}</strong>
+                            {act.badge && (
+                              <span className="badge bg-secondary">
+                                {act.badge}
+                              </span>
+                            )}
+                          </div>
+                          <div className="small text-light opacity-75 mt-1">
+                            {act.description}
+                          </div>
+                        </div>
+                      </div>
+
+                      {siteData.activities.length > 0 && (
+                        <div className="d-flex gap-2 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => startEditActivity(act)}
+                            className="btn btn-outline-gold btn-sm"
+                          >
+                            تعديل
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteActivity(act.id)}
+                            className="btn btn-outline-danger btn-sm"
+                          >
+                            حذف
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "committees" && (
+          <div className="row g-4">
+            <div className="col-lg-5">
+              <div className="card rover-card p-4">
+                <div className="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
+                  <h5 className="fw-bold text-warning mb-0">
+                    {editingCommitteeId ? "تعديل لجنة" : "إضافة لجنة نوعية"}
+                  </h5>
+                  {siteData.committees.length === 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-gold btn-sm"
+                      onClick={() => handleLoadDefaults("committees")}
+                    >
+                      اعتماد الافتراضيات
+                    </button>
+                  )}
+                </div>
+
+                {editingCommitteeId ? (
+                  <form onSubmit={handleSaveEditedCommittee}>
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        اسم اللجنة
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary"
+                        required
+                        value={editCommitteeForm.title}
+                        onChange={(e) =>
+                          setEditCommitteeForm({
+                            ...editCommitteeForm,
+                            title: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        ملخص اللجنة
+                      </label>
+                      <textarea
+                        className="form-control bg-dark text-white border-secondary"
+                        rows="2"
+                        required
+                        value={editCommitteeForm.summary}
+                        onChange={(e) =>
+                          setEditCommitteeForm({
+                            ...editCommitteeForm,
+                            summary: e.target.value,
+                          })
+                        }
+                      ></textarea>
+                    </div>
+
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        رابط صورة مباشر (URL) أو ملف صغير
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary mb-2"
+                        placeholder="https://..."
+                        value={editCommitteeForm.image}
+                        onChange={(e) =>
+                          setEditCommitteeForm({
+                            ...editCommitteeForm,
+                            image: e.target.value,
+                          })
+                        }
+                      />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="form-control bg-dark text-white border-secondary"
+                        onChange={(e) =>
+                          handleFileChange(
+                            e,
+                            (img) =>
+                              setEditCommitteeForm({
+                                ...editCommitteeForm,
+                                image: img,
+                              }),
+                            (msg) => setCommitteeNotice(msg)
+                          )
+                        }
+                      />
+                    </div>
+
+                    {editCommitteeForm.image && (
+                      <div className="mb-2 text-center">
+                        <img
+                          src={editCommitteeForm.image}
+                          alt="معاينة"
+                          className="img-fluid rounded-3 border border-warning"
+                          style={{ maxHeight: "110px", objectFit: "cover" }}
+                        />
+                      </div>
+                    )}
+
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        المهام (كل مهمة في سطر)
+                      </label>
+                      <textarea
+                        className="form-control bg-dark text-white border-secondary"
+                        rows="3"
+                        value={editCommitteeForm.tasksText}
+                        onChange={(e) =>
+                          setEditCommitteeForm({
+                            ...editCommitteeForm,
+                            tasksText: e.target.value,
+                          })
+                        }
+                      ></textarea>
+                    </div>
+
+                    <div className="mb-3">
+                      <label className="form-label small text-warning">
+                        المهارات المكتسبة (مفصولة بفاصلة)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary"
+                        value={editCommitteeForm.skillsText}
+                        onChange={(e) =>
+                          setEditCommitteeForm({
+                            ...editCommitteeForm,
+                            skillsText: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="d-flex gap-2">
+                      <button type="submit" className="btn btn-gold flex-grow-1">
+                        حفظ التعديل
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline-gold"
+                        onClick={() => setEditingCommitteeId(null)}
+                      >
+                        إلغاء
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <form onSubmit={handleAddCommittee}>
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        اسم اللجنة
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary"
+                        placeholder="مثال: لجنة الإعلام والتوثيق"
+                        required
+                        value={newCommitteeForm.title}
+                        onChange={(e) =>
+                          setNewCommitteeForm({
+                            ...newCommitteeForm,
+                            title: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        ملخص اللجنة
+                      </label>
+                      <textarea
+                        className="form-control bg-dark text-white border-secondary"
+                        rows="2"
+                        placeholder="دور اللجنة باختصار..."
+                        required
+                        value={newCommitteeForm.summary}
+                        onChange={(e) =>
+                          setNewCommitteeForm({
+                            ...newCommitteeForm,
+                            summary: e.target.value,
+                          })
+                        }
+                      ></textarea>
+                    </div>
+
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        رابط صورة مباشر (URL) أو ملف صغير
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary mb-2"
+                        placeholder="https://..."
+                        value={newCommitteeForm.image}
+                        onChange={(e) =>
+                          setNewCommitteeForm({
+                            ...newCommitteeForm,
+                            image: e.target.value,
+                          })
+                        }
+                      />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="form-control bg-dark text-white border-secondary"
+                        onChange={(e) =>
+                          handleFileChange(
+                            e,
+                            (img) =>
+                              setNewCommitteeForm({
+                                ...newCommitteeForm,
+                                image: img,
+                              }),
+                            (msg) => setCommitteeNotice(msg)
+                          )
+                        }
+                      />
+                    </div>
+
+                    {newCommitteeForm.image && (
+                      <div className="mb-2 text-center">
+                        <img
+                          src={newCommitteeForm.image}
+                          alt="معاينة"
+                          className="img-fluid rounded-3 border border-warning"
+                          style={{ maxHeight: "110px", objectFit: "cover" }}
+                        />
+                      </div>
+                    )}
+
+                    <div className="mb-2">
+                      <label className="form-label small text-warning">
+                        المهام (كل مهمة في سطر)
+                      </label>
+                      <textarea
+                        className="form-control bg-dark text-white border-secondary"
+                        rows="3"
+                        placeholder="مهمة 1&#10;مهمة 2"
+                        value={newCommitteeForm.tasksText}
+                        onChange={(e) =>
+                          setNewCommitteeForm({
+                            ...newCommitteeForm,
+                            tasksText: e.target.value,
+                          })
+                        }
+                      ></textarea>
+                    </div>
+
+                    <div className="mb-3">
+                      <label className="form-label small text-warning">
+                        المهارات المكتسبة (مفصولة بفاصلة)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary"
+                        placeholder="التخطيط، التواصل، إدارة الوقت"
+                        value={newCommitteeForm.skillsText}
+                        onChange={(e) =>
+                          setNewCommitteeForm({
+                            ...newCommitteeForm,
+                            skillsText: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+
+                    <button type="submit" className="btn btn-gold w-100">
+                      + إضافة لجنة
+                    </button>
+                  </form>
+                )}
+
+                {committeeNotice && (
+                  <div className="text-warning small fw-bold text-center mt-3">
+                    {committeeNotice}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="col-lg-7">
+              <div className="card rover-card p-4">
+                <h5 className="fw-bold text-warning mb-3">
+                  اللجان النوعية الحالية ({displayedCommittees.length})
+                </h5>
+                <div className="d-flex flex-column gap-3">
+                  {displayedCommittees.map((com) => (
+                    <div
+                      key={com.id}
+                      className="p-3 rounded-3 bg-dark border border-secondary d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-3"
+                    >
+                      <div className="d-flex align-items-center gap-3">
+                        {com.image && (
+                          <img
+                            src={com.image}
+                            alt={com.title}
+                            className="rounded-2 border border-warning"
+                            style={{
+                              width: "68px",
+                              height: "68px",
+                              objectFit: "cover",
+                            }}
+                          />
+                        )}
+                        <div>
+                          <strong className="text-warning">{com.title}</strong>
+                          <div className="small text-light opacity-75 mt-1">
+                            {com.summary}
+                          </div>
+                        </div>
+                      </div>
+
+                      {siteData.committees.length > 0 && (
+                        <div className="d-flex gap-2 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => startEditCommittee(com)}
+                            className="btn btn-outline-gold btn-sm"
+                          >
+                            تعديل
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCommittee(com.id)}
+                            className="btn btn-outline-danger btn-sm"
+                          >
+                            حذف
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === "gallery" && (
           <div className="row g-4">
             <div className="col-lg-5">
               <div className="card rover-card p-4">
-                <h5 className="fw-bold text-warning mb-2">إضافة فعالية جديدة للمعرض</h5>
+                <h5 className="fw-bold text-warning mb-2">
+                  إضافة فعالية جديدة للمعرض
+                </h5>
                 <p className="text-secondary small mb-3">
                   اختر قالباً جاهزاً أو اكتب البيانات وأضف رابط صورة أو ملفاً صغيراً:
                 </p>
@@ -734,41 +1665,20 @@ export default function AdminDashboard() {
                 </div>
 
                 <form onSubmit={handleAddGallery}>
-                  <div className="row g-2 mb-2">
-                    <div className="col-8">
-                      <label className="form-label small text-warning mb-1">
-                        عنوان الفعالية
-                      </label>
-                      <input
-                        type="text"
-                        className="form-control bg-dark text-white border-secondary"
-                        placeholder="مثال: معسكر إعداد القادة"
-                        required
-                        value={newGallery.title}
-                        onChange={(e) =>
-                          setNewGallery({ ...newGallery, title: e.target.value })
-                        }
-                      />
-                    </div>
-                    <div className="col-4">
-                      <label className="form-label small text-warning mb-1">
-                        أيقونة / إيموجي
-                      </label>
-                      <select
-                        className="form-select bg-dark text-white border-secondary"
-                        value={newGallery.icon}
-                        onChange={(e) =>
-                          setNewGallery({ ...newGallery, icon: e.target.value })
-                        }
-                      >
-                        <option value="🏕️">🏕️ مخيم</option>
-                        <option value="⛺">⛺ خيمة</option>
-                        <option value="⛵">⛵ بحري</option>
-                        <option value="❤️">❤️ خير</option>
-                        <option value="🌙">🌙 إفطار</option>
-                        <option value="⚜️">⚜️ شعار</option>
-                      </select>
-                    </div>
+                  <div className="mb-2">
+                    <label className="form-label small text-warning mb-1">
+                      عنوان الفعالية
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control bg-dark text-white border-secondary"
+                      placeholder="مثال: معسكر إعداد القادة"
+                      required
+                      value={newGallery.title}
+                      onChange={(e) =>
+                        setNewGallery({ ...newGallery, title: e.target.value })
+                      }
+                    />
                   </div>
 
                   <div className="mb-2">
@@ -792,7 +1702,8 @@ export default function AdminDashboard() {
                       onChange={(e) =>
                         handleFileChange(
                           e,
-                          (img) => setNewGallery({ ...newGallery, image: img }),
+                          (img) =>
+                            setNewGallery({ ...newGallery, image: img }),
                           (msg) => setGalleryNotice(msg)
                         )
                       }
@@ -821,7 +1732,10 @@ export default function AdminDashboard() {
                       required
                       value={newGallery.shortDesc}
                       onChange={(e) =>
-                        setNewGallery({ ...newGallery, shortDesc: e.target.value })
+                        setNewGallery({
+                          ...newGallery,
+                          shortDesc: e.target.value,
+                        })
                       }
                     />
                   </div>
@@ -837,7 +1751,10 @@ export default function AdminDashboard() {
                       required
                       value={newGallery.details}
                       onChange={(e) =>
-                        setNewGallery({ ...newGallery, details: e.target.value })
+                        setNewGallery({
+                          ...newGallery,
+                          details: e.target.value,
+                        })
                       }
                     ></textarea>
                   </div>
@@ -869,14 +1786,18 @@ export default function AdminDashboard() {
                             src={g.image}
                             alt={g.title}
                             className="rounded-2 border border-warning"
-                            style={{ width: "56px", height: "56px", objectFit: "cover" }}
+                            style={{
+                              width: "56px",
+                              height: "56px",
+                              objectFit: "cover",
+                            }}
                           />
                         )}
                         <div>
-                          <strong className="text-warning">
-                            {g.icon} {g.title}
-                          </strong>
-                          <p className="small text-secondary mb-0">{g.shortDesc}</p>
+                          <strong className="text-warning">{g.title}</strong>
+                          <p className="small text-secondary mb-0">
+                            {g.shortDesc}
+                          </p>
                         </div>
                       </div>
                       <button
@@ -897,7 +1818,9 @@ export default function AdminDashboard() {
           <div className="card rover-card p-4">
             <h5 className="fw-bold text-warning mb-3">طلبات الانضمام الواردة</h5>
             {requestNotice && (
-              <div className="alert alert-warning py-2 small">{requestNotice}</div>
+              <div className="alert alert-warning py-2 small">
+                {requestNotice}
+              </div>
             )}
             <div className="table-responsive">
               <table className="table table-dark table-hover align-middle">
@@ -928,13 +1851,17 @@ export default function AdminDashboard() {
                       </td>
                       <td>{req.committee}</td>
                       <td>
-                        <span className="badge bg-warning text-dark">{req.status}</span>
+                        <span className="badge bg-warning text-dark">
+                          {req.status}
+                        </span>
                       </td>
                       <td>
                         <select
                           className="form-select form-select-sm bg-black text-white border-secondary"
                           value={req.status}
-                          onChange={(e) => handleUpdateStatus(req.id, e.target.value)}
+                          onChange={(e) =>
+                            handleUpdateStatus(req.id, e.target.value)
+                          }
                         >
                           <option>جديد</option>
                           <option>تم التواصل</option>
@@ -953,7 +1880,9 @@ export default function AdminDashboard() {
           <div className="row g-4">
             <div className="col-md-6">
               <div className="card rover-card p-4 h-100">
-                <h5 className="fw-bold text-warning mb-3">شعار العشيرة (Logo)</h5>
+                <h5 className="fw-bold text-warning mb-3">
+                  شعار العشيرة (Logo)
+                </h5>
                 <form onSubmit={handleSaveLogo}>
                   <div className="mb-3">
                     <label className="form-label small text-warning">
@@ -995,7 +1924,7 @@ export default function AdminDashboard() {
                   </button>
                   {logoSaved && (
                     <div className="text-warning small fw-bold text-center mt-2">
-                      ✅ تم حفظ الشعار!
+                      تم حفظ الشعار.
                     </div>
                   )}
                   {logoError && (
@@ -1061,7 +1990,7 @@ export default function AdminDashboard() {
                   </div>
                   {heroBgSaved && (
                     <div className="text-warning small fw-bold text-center mt-2">
-                      ✅ تم حفظ خلفية الهيرو!
+                      تم حفظ خلفية الهيرو.
                     </div>
                   )}
                   {heroBgError && (
@@ -1083,7 +2012,11 @@ export default function AdminDashboard() {
                   type="button"
                   className="btn btn-outline-danger btn-sm"
                   onClick={async () => {
-                    if (window.confirm("هل أنت متأكد من إعادة ضبط بيانات الموقع؟")) {
+                    if (
+                      window.confirm(
+                        "هل أنت متأكد من إعادة ضبط بيانات الموقع؟"
+                      )
+                    ) {
                       await resetToDefault();
                     }
                   }}
