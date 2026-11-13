@@ -1,6 +1,6 @@
 export function compressImageToDataUrl(
   file,
-  { maxWidth = 900, maxHeight = 900, quality = 0.65 } = {}
+  { maxWidth = 640, maxHeight = 640, initialQuality = 0.5, minQuality = 0.25 } = {}
 ) {
   return new Promise((resolve, reject) => {
     if (!file || !file.type || !file.type.startsWith("image/")) {
@@ -20,8 +20,8 @@ export function compressImageToDataUrl(
           const widthRatio = maxWidth / width;
           const heightRatio = maxHeight / height;
           const ratio = Math.min(widthRatio, heightRatio);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
+          width = Math.max(1, Math.round(width * ratio));
+          height = Math.max(1, Math.round(height * ratio));
         }
 
         const canvas = document.createElement("canvas");
@@ -36,10 +36,21 @@ export function compressImageToDataUrl(
 
         ctx.drawImage(img, 0, 0, width, height);
 
+        let quality = initialQuality;
+        let dataUrl = "";
+
         try {
-          const compressedDataUrl = canvas.toDataURL("image/jpeg", quality);
-          resolve(compressedDataUrl);
-        } catch (err) {
+          dataUrl = canvas.toDataURL("image/jpeg", quality);
+
+          // تقليل الجودة تدريجياً لو حجم الـ DataURL كبير (أكبر من ~45 KB)
+          const maxDataUrlChars = 45 * 1024;
+          while (dataUrl.length > maxDataUrlChars && quality > minQuality) {
+            quality = Math.max(minQuality, Number((quality - 0.1).toFixed(2)));
+            dataUrl = canvas.toDataURL("image/jpeg", quality);
+          }
+
+          resolve(dataUrl);
+        } catch {
           reject(new Error("فشل ضغط الصورة."));
         }
       };
