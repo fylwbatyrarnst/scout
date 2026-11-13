@@ -1,11 +1,4 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-} from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import {
   isCloudConfigured,
   fetchRemoteSiteData,
@@ -15,48 +8,49 @@ import {
 const SiteContext = createContext();
 
 const LOCAL_CACHE_KEY = "rover_site_data_cache_v2";
-const POLL_INTERVAL_MS = 12000;
+const POLL_INTERVAL_MS = 15000;
 
 function normalizeSiteData(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
 
   const upcomingEvents = Array.isArray(src.upcomingEvents)
-    ? src.upcomingEvents.map((ev, idx) => ({
-        id: ev?.id ?? `${Date.now()}-${idx}`,
-        active: ev?.active !== false,
-        title: typeof ev?.title === "string" ? ev.title : "",
-        date: typeof ev?.date === "string" ? ev.date : "",
-        location: typeof ev?.location === "string" ? ev.location : "",
-        description:
+    ? src.upcomingEvents.map((ev, idx) => {
+        const desc =
           typeof ev?.description === "string"
             ? ev.description
             : typeof ev?.shortDesc === "string"
-              ? ev.shortDesc
-              : "",
-        shortDesc:
-          typeof ev?.shortDesc === "string"
             ? ev.shortDesc
-            : typeof ev?.description === "string"
-              ? ev.description
-              : "",
-        image: typeof ev?.image === "string" ? ev.image : "",
-      }))
+            : "";
+        return {
+          id: ev?.id ?? `${Date.now()}-${idx}`,
+          active: ev?.active !== false,
+          title: typeof ev?.title === "string" ? ev.title : "",
+          date: typeof ev?.date === "string" ? ev.date : "",
+          location: typeof ev?.location === "string" ? ev.location : "",
+          description: desc,
+          shortDesc: desc,
+          image: typeof ev?.image === "string" ? ev.image : "",
+        };
+      })
     : [];
 
   const gallery = Array.isArray(src.gallery)
-    ? src.gallery.map((item, idx) => ({
-        id: item?.id ?? `${Date.now()}-g-${idx}`,
-        title: typeof item?.title === "string" ? item.title : "",
-        icon: typeof item?.icon === "string" ? item.icon : "🏕️",
-        shortDesc: typeof item?.shortDesc === "string" ? item.shortDesc : "",
-        details:
+    ? src.gallery.map((item, idx) => {
+        const detailsText =
           typeof item?.details === "string"
             ? item.details
             : typeof item?.shortDesc === "string"
-              ? item.shortDesc
-              : "",
-        image: typeof item?.image === "string" ? item.image : "",
-      }))
+            ? item.shortDesc
+            : "";
+        return {
+          id: item?.id ?? `${Date.now()}-g-${idx}`,
+          title: typeof item?.title === "string" ? item.title : "",
+          icon: typeof item?.icon === "string" ? item.icon : "🏕️",
+          shortDesc: typeof item?.shortDesc === "string" ? item.shortDesc : "",
+          details: detailsText,
+          image: typeof item?.image === "string" ? item.image : "",
+        };
+      })
     : [];
 
   const joinRequests = Array.isArray(src.joinRequests) ? src.joinRequests : [];
@@ -150,9 +144,7 @@ export function SiteProvider({ children }) {
       }
     } catch (err) {
       if (!isSavingRef.current) {
-        setLastSyncError(
-          err?.message || "تعذر الاتصال بقاعدة البيانات السحابية",
-        );
+        setLastSyncError(err?.message || "تعذر الاتصال بقاعدة البيانات السحابية");
       }
     } finally {
       if (!silent) setIsSyncing(false);
@@ -167,7 +159,11 @@ export function SiteProvider({ children }) {
       refreshFromCloud({ silent: true });
     }, POLL_INTERVAL_MS);
 
-    const handleFocus = () => refreshFromCloud({ silent: true });
+    const handleFocus = () => {
+      if (!isSavingRef.current) {
+        refreshFromCloud({ silent: true });
+      }
+    };
     window.addEventListener("focus", handleFocus);
 
     return () => {
@@ -177,6 +173,8 @@ export function SiteProvider({ children }) {
   }, [refreshFromCloud]);
 
   const commitState = useCallback(async (updater) => {
+    isSavingRef.current = true;
+
     const prevNormalized = normalizeSiteData(siteDataRef.current);
     const computed =
       typeof updater === "function" ? updater(prevNormalized) : updater;
@@ -187,10 +185,12 @@ export function SiteProvider({ children }) {
     writeLocalCache(nextNormalized);
 
     if (!isCloudConfigured) {
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 500);
       return { ok: true, cloudError: "" };
     }
 
-    isSavingRef.current = true;
     setIsSyncing(true);
     setLastSyncError("");
 
@@ -205,7 +205,7 @@ export function SiteProvider({ children }) {
       setIsSyncing(false);
       setTimeout(() => {
         isSavingRef.current = false;
-      }, 1500);
+      }, 2500);
     }
   }, []);
 
@@ -216,7 +216,7 @@ export function SiteProvider({ children }) {
         logoUrl: typeof logoUrl === "string" ? logoUrl.trim() : "",
       }));
     },
-    [commitState],
+    [commitState]
   );
 
   const updateHeroBackgroundUrl = useCallback(
@@ -227,19 +227,26 @@ export function SiteProvider({ children }) {
           typeof heroBackgroundUrl === "string" ? heroBackgroundUrl.trim() : "",
       }));
     },
-    [commitState],
+    [commitState]
   );
 
   const addUpcomingEvent = useCallback(
     (newEvent) => {
+      const desc =
+        typeof newEvent?.description === "string"
+          ? newEvent.description
+          : typeof newEvent?.shortDesc === "string"
+          ? newEvent.shortDesc
+          : "";
+
       const created = {
         id: Date.now(),
         active: newEvent?.active !== false,
-        title: newEvent?.title || "",
-        date: newEvent?.date || "",
-        location: newEvent?.location || "",
-        description: newEvent?.description || "",
-        shortDesc: newEvent?.description || "",
+        title: typeof newEvent?.title === "string" ? newEvent.title : "",
+        date: typeof newEvent?.date === "string" ? newEvent.date : "",
+        location: typeof newEvent?.location === "string" ? newEvent.location : "",
+        description: desc,
+        shortDesc: desc,
         image: typeof newEvent?.image === "string" ? newEvent.image : "",
       };
 
@@ -248,28 +255,52 @@ export function SiteProvider({ children }) {
         upcomingEvents: [created, ...prev.upcomingEvents],
       }));
     },
-    [commitState],
+    [commitState]
   );
 
   const updateUpcomingEvent = useCallback(
     (id, updatedFields) => {
       return commitState((prev) => ({
         ...prev,
-        upcomingEvents: prev.upcomingEvents.map((ev) =>
-          String(ev.id) === String(id)
-            ? {
-                ...ev,
-                ...updatedFields,
-                shortDesc:
-                  updatedFields?.description !== undefined
-                    ? updatedFields.description
-                    : ev.shortDesc,
-              }
-            : ev,
-        ),
+        upcomingEvents: prev.upcomingEvents.map((ev) => {
+          if (String(ev.id) !== String(id)) return ev;
+          const nextDesc =
+            updatedFields?.description !== undefined
+              ? String(updatedFields.description)
+              : updatedFields?.shortDesc !== undefined
+              ? String(updatedFields.shortDesc)
+              : ev.description || ev.shortDesc || "";
+
+          return {
+            ...ev,
+            ...updatedFields,
+            active:
+              updatedFields?.active !== undefined
+                ? Boolean(updatedFields.active)
+                : ev.active,
+            title:
+              updatedFields?.title !== undefined
+                ? String(updatedFields.title)
+                : ev.title,
+            date:
+              updatedFields?.date !== undefined
+                ? String(updatedFields.date)
+                : ev.date,
+            location:
+              updatedFields?.location !== undefined
+                ? String(updatedFields.location)
+                : ev.location,
+            description: nextDesc,
+            shortDesc: nextDesc,
+            image:
+              updatedFields?.image !== undefined
+                ? String(updatedFields.image)
+                : ev.image,
+          };
+        }),
       }));
     },
-    [commitState],
+    [commitState]
   );
 
   const deleteUpcomingEvent = useCallback(
@@ -277,21 +308,28 @@ export function SiteProvider({ children }) {
       return commitState((prev) => ({
         ...prev,
         upcomingEvents: prev.upcomingEvents.filter(
-          (ev) => String(ev.id) !== String(id),
+          (ev) => String(ev.id) !== String(id)
         ),
       }));
     },
-    [commitState],
+    [commitState]
   );
 
   const addGalleryItem = useCallback(
     (item) => {
+      const detailsText =
+        typeof item?.details === "string"
+          ? item.details
+          : typeof item?.shortDesc === "string"
+          ? item.shortDesc
+          : "";
+
       const created = {
         id: Date.now(),
-        title: item?.title || "",
-        icon: item?.icon || "🏕️",
-        shortDesc: item?.shortDesc || "",
-        details: item?.details || item?.shortDesc || "",
+        title: typeof item?.title === "string" ? item.title : "",
+        icon: typeof item?.icon === "string" ? item.icon : "🏕️",
+        shortDesc: typeof item?.shortDesc === "string" ? item.shortDesc : "",
+        details: detailsText,
         image: typeof item?.image === "string" ? item.image : "",
       };
 
@@ -300,7 +338,7 @@ export function SiteProvider({ children }) {
         gallery: [created, ...prev.gallery],
       }));
     },
-    [commitState],
+    [commitState]
   );
 
   const deleteGalleryItem = useCallback(
@@ -310,7 +348,7 @@ export function SiteProvider({ children }) {
         gallery: prev.gallery.filter((item) => String(item.id) !== String(id)),
       }));
     },
-    [commitState],
+    [commitState]
   );
 
   const addJoinRequest = useCallback(
@@ -327,7 +365,7 @@ export function SiteProvider({ children }) {
         joinRequests: [created, ...prev.joinRequests],
       }));
     },
-    [commitState],
+    [commitState]
   );
 
   const updateRequestStatus = useCallback(
@@ -335,11 +373,11 @@ export function SiteProvider({ children }) {
       return commitState((prev) => ({
         ...prev,
         joinRequests: prev.joinRequests.map((r) =>
-          String(r.id) === String(id) ? { ...r, status } : r,
+          String(r.id) === String(id) ? { ...r, status } : r
         ),
       }));
     },
-    [commitState],
+    [commitState]
   );
 
   const resetToDefault = useCallback(() => {
