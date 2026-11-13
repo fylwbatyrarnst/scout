@@ -1,10 +1,10 @@
-
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useSite } from "../context/SiteContext";
 import { pickFileFromDevice } from "../lib/imageFile";
 
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "rover2026";
+const MAX_IMAGE_DATA_URL_CHARS = 28 * 1024; // ~28 KB كحد أقصى لصورة Base64 واحدة
 
 const GALLERY_TEMPLATES = [
   {
@@ -72,6 +72,7 @@ export default function AdminDashboard() {
 
   const [logoInput, setLogoInput] = useState(siteData.logoUrl || "/rover-logo.svg");
   const [logoSaved, setLogoSaved] = useState(false);
+  const [logoError, setLogoError] = useState("");
 
   const [heroBgInput, setHeroBgInput] = useState(siteData.heroBackgroundUrl || "");
   const [heroBgSaved, setHeroBgSaved] = useState(false);
@@ -89,28 +90,55 @@ export default function AdminDashboard() {
     details: "",
     image: "",
   });
-  const [galleryAdded, setGalleryAdded] = useState(false);
+  const [galleryNotice, setGalleryNotice] = useState("");
+
+  const [requestNotice, setRequestNotice] = useState("");
 
   useEffect(() => {
     setLogoInput(siteData.logoUrl || "/rover-logo.svg");
     setHeroBgInput(siteData.heroBackgroundUrl || "");
   }, [siteData.logoUrl, siteData.heroBackgroundUrl]);
 
-  const handleFileChange = async (e, onPicked, maxWidth = 900, quality = 0.72) => {
+  const handleFileChange = async (
+    e,
+    onPicked,
+    onErrorMsg,
+    maxWidth = 480,
+    quality = 0.42
+  ) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+
     try {
       const base64 = await pickFileFromDevice(file, maxWidth, quality);
+      if (typeof base64 === "string" && base64.length > MAX_IMAGE_DATA_URL_CHARS) {
+        const approxKb = (base64.length / 1024).toFixed(1);
+        const msg = `حجم الصورة بعد الضغط (${approxKb} KB) كبير على حد 100 KB في JSONBin المجاني. الأفضل استخدام رابط صورة مباشر (URL) أو تقليل الصور المخزنة.`;
+        if (onErrorMsg) {
+          onErrorMsg(msg);
+        } else {
+          alert(msg);
+        }
+        return null;
+      }
+
+      if (onErrorMsg) onErrorMsg("");
       onPicked(base64);
       return base64;
     } catch (err) {
-      alert(err?.message || "تعذر تحميل الصورة من الجهاز.");
+      const msg = err?.message || "تعذر تحميل الصورة من الجهاز.";
+      if (onErrorMsg) {
+        onErrorMsg(msg);
+      } else {
+        alert(msg);
+      }
       return null;
     }
   };
 
   const applyTemplate = (tpl) => {
+    setGalleryNotice("");
     setNewGallery({
       title: tpl.title,
       icon: tpl.icon,
@@ -137,6 +165,7 @@ export default function AdminDashboard() {
   };
 
   const startEditEvent = (ev) => {
+    setEventNotice("");
     setEditingEventId(ev.id);
     setEditEventForm({
       active: ev.active !== false,
@@ -157,32 +186,80 @@ export default function AdminDashboard() {
         ? `⚠️ تم التحديث محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
         : "✅ تم تحديث بيانات الحدث!"
     );
-    setTimeout(() => setEventNotice(""), 3500);
+    setTimeout(() => setEventNotice(""), 4000);
   };
 
   const handleAddNewEvent = async (e) => {
     e.preventDefault();
     const res = await addUpcomingEvent(newEventForm);
-    setNewEventForm(EMPTY_EVENT);
+    if (res?.ok !== false) {
+      setNewEventForm(EMPTY_EVENT);
+    }
     setEventNotice(
       res?.ok === false
         ? `⚠️ تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
         : "✅ تمت إضافة الحدث الجديد!"
     );
-    setTimeout(() => setEventNotice(""), 3500);
+    setTimeout(() => setEventNotice(""), 4000);
   };
 
   const handleDeleteEvent = async (id) => {
     const res = await deleteUpcomingEvent(id);
-    if (res?.ok === false) {
-      setEventNotice(`⚠️ تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`);
-      setTimeout(() => setEventNotice(""), 3500);
+    setEventNotice(
+      res?.ok === false
+        ? `⚠️ تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
+        : "✅ تم حذف الحدث."
+    );
+    setTimeout(() => setEventNotice(""), 4000);
+  };
+
+  const handleAddGallery = async (e) => {
+    e.preventDefault();
+    const res = await addGalleryItem(newGallery);
+    if (res?.ok !== false) {
+      setNewGallery({
+        title: "",
+        icon: "🏕️",
+        shortDesc: "",
+        details: "",
+        image: "",
+      });
     }
+    setGalleryNotice(
+      res?.ok === false
+        ? `⚠️ تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
+        : "✅ تمت إضافة الفعالية للمعرض!"
+    );
+    setTimeout(() => setGalleryNotice(""), 4000);
+  };
+
+  const handleDeleteGallery = async (id) => {
+    const res = await deleteGalleryItem(id);
+    setGalleryNotice(
+      res?.ok === false
+        ? `⚠️ تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
+        : "✅ تم حذف الفعالية من المعرض."
+    );
+    setTimeout(() => setGalleryNotice(""), 4000);
+  };
+
+  const handleSaveLogo = async (e) => {
+    e.preventDefault();
+    setLogoError("");
+    setLogoSaved(false);
+    const res = await updateLogoUrl(logoInput);
+    if (res?.ok === false) {
+      setLogoError(res.cloudError || "تعذر حفظ الشعار على السحابة");
+      return;
+    }
+    setLogoSaved(true);
+    setTimeout(() => setLogoSaved(false), 3000);
   };
 
   const handleSaveHeroBg = async (e) => {
     e.preventDefault();
     setHeroBgError("");
+    setHeroBgSaved(false);
     try {
       const res = await updateHeroBackgroundUrl(heroBgInput);
       if (res?.ok === false) {
@@ -193,6 +270,14 @@ export default function AdminDashboard() {
       setTimeout(() => setHeroBgSaved(false), 3000);
     } catch (err) {
       setHeroBgError(err?.message || "حدث خطأ أثناء حفظ خلفية الهيرو");
+    }
+  };
+
+  const handleUpdateStatus = async (id, status) => {
+    const res = await updateRequestStatus(id, status);
+    if (res?.ok === false) {
+      setRequestNotice(`⚠️ تم التحديث محلياً وتعذر حفظه على السحابة: ${res.cloudError}`);
+      setTimeout(() => setRequestNotice(""), 4000);
     }
   };
 
@@ -277,7 +362,9 @@ export default function AdminDashboard() {
         <ul className="nav nav-pills mb-4 gap-2 flex-wrap">
           <li className="nav-item">
             <button
-              className={`nav-link ${activeTab === "event" ? "btn-gold text-dark" : "rover-card text-light"}`}
+              className={`nav-link ${
+                activeTab === "event" ? "btn-gold text-dark" : "rover-card text-light"
+              }`}
               onClick={() => setActiveTab("event")}
             >
               📅 الأحداث القادمة ({siteData.upcomingEvents.length})
@@ -285,7 +372,9 @@ export default function AdminDashboard() {
           </li>
           <li className="nav-item">
             <button
-              className={`nav-link ${activeTab === "gallery" ? "btn-gold text-dark" : "rover-card text-light"}`}
+              className={`nav-link ${
+                activeTab === "gallery" ? "btn-gold text-dark" : "rover-card text-light"
+              }`}
               onClick={() => setActiveTab("gallery")}
             >
               🖼️ إدارة المعرض ({siteData.gallery.length})
@@ -293,7 +382,9 @@ export default function AdminDashboard() {
           </li>
           <li className="nav-item">
             <button
-              className={`nav-link ${activeTab === "requests" ? "btn-gold text-dark" : "rover-card text-light"}`}
+              className={`nav-link ${
+                activeTab === "requests" ? "btn-gold text-dark" : "rover-card text-light"
+              }`}
               onClick={() => setActiveTab("requests")}
             >
               📩 طلبات الانضمام ({siteData.joinRequests.length})
@@ -301,7 +392,9 @@ export default function AdminDashboard() {
           </li>
           <li className="nav-item">
             <button
-              className={`nav-link ${activeTab === "branding" ? "btn-gold text-dark" : "rover-card text-light"}`}
+              className={`nav-link ${
+                activeTab === "branding" ? "btn-gold text-dark" : "rover-card text-light"
+              }`}
               onClick={() => setActiveTab("branding")}
             >
               ⚜️ الشعار وخلفية الهيرو
@@ -370,14 +463,27 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="mb-2">
-                      <label className="form-label small text-warning">اختر صورة من الهاتف</label>
+                      <label className="form-label small text-warning">
+                        رابط صورة مباشر (URL) أو اختر ملفاً صغيراً
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary mb-2"
+                        placeholder="https://..."
+                        value={editEventForm.image}
+                        onChange={(e) =>
+                          setEditEventForm({ ...editEventForm, image: e.target.value })
+                        }
+                      />
                       <input
                         type="file"
                         accept="image/*"
                         className="form-control bg-dark text-white border-secondary"
                         onChange={(e) =>
-                          handleFileChange(e, (img) =>
-                            setEditEventForm({ ...editEventForm, image: img })
+                          handleFileChange(
+                            e,
+                            (img) => setEditEventForm({ ...editEventForm, image: img }),
+                            (msg) => setEventNotice(msg)
                           )
                         }
                       />
@@ -431,7 +537,9 @@ export default function AdminDashboard() {
                           setNewEventForm({ ...newEventForm, active: e.target.checked })
                         }
                       />
-                      <label className="form-check-label fw-bold">إظهار الحدث في قسم الأحداث القادمة</label>
+                      <label className="form-check-label fw-bold">
+                        إظهار الحدث في قسم الأحداث القادمة
+                      </label>
                     </div>
 
                     <div className="mb-2">
@@ -475,15 +583,28 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="mb-2">
-                      <label className="form-label small text-warning">اختر صورة من الهاتف</label>
+                      <label className="form-label small text-warning">
+                        رابط صورة مباشر (URL) أو اختر ملفاً صغيراً
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control bg-dark text-white border-secondary mb-2"
+                        placeholder="https://..."
+                        value={newEventForm.image}
+                        onChange={(e) =>
+                          setNewEventForm({ ...newEventForm, image: e.target.value })
+                        }
+                      />
                       <input
                         type="file"
                         accept="image/*"
                         className="form-control bg-dark text-white border-secondary"
                         required={!newEventForm.image}
                         onChange={(e) =>
-                          handleFileChange(e, (img) =>
-                            setNewEventForm({ ...newEventForm, image: img })
+                          handleFileChange(
+                            e,
+                            (img) => setNewEventForm({ ...newEventForm, image: img }),
+                            (msg) => setEventNotice(msg)
                           )
                         }
                       />
@@ -521,7 +642,9 @@ export default function AdminDashboard() {
                 )}
 
                 {eventNotice && (
-                  <div className="text-warning small fw-bold text-center mt-3">{eventNotice}</div>
+                  <div className="text-warning small fw-bold text-center mt-3">
+                    {eventNotice}
+                  </div>
                 )}
               </div>
             </div>
@@ -594,7 +717,7 @@ export default function AdminDashboard() {
               <div className="card rover-card p-4">
                 <h5 className="fw-bold text-warning mb-2">إضافة فعالية جديدة للمعرض</h5>
                 <p className="text-secondary small mb-3">
-                  اختر قالباً جاهزاً أو اكتب البيانات واختر الصورة من هاتفك:
+                  اختر قالباً جاهزاً أو اكتب البيانات وأضف رابط صورة أو ملفاً صغيراً:
                 </p>
 
                 <div className="d-flex flex-wrap gap-2 mb-3">
@@ -610,39 +733,33 @@ export default function AdminDashboard() {
                   ))}
                 </div>
 
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    addGalleryItem(newGallery);
-                    setNewGallery({
-                      title: "",
-                      icon: "🏕️",
-                      shortDesc: "",
-                      details: "",
-                      image: "",
-                    });
-                    setGalleryAdded(true);
-                    setTimeout(() => setGalleryAdded(false), 3000);
-                  }}
-                >
+                <form onSubmit={handleAddGallery}>
                   <div className="row g-2 mb-2">
                     <div className="col-8">
-                      <label className="form-label small text-warning mb-1">عنوان الفعالية</label>
+                      <label className="form-label small text-warning mb-1">
+                        عنوان الفعالية
+                      </label>
                       <input
                         type="text"
                         className="form-control bg-dark text-white border-secondary"
                         placeholder="مثال: معسكر إعداد القادة"
                         required
                         value={newGallery.title}
-                        onChange={(e) => setNewGallery({ ...newGallery, title: e.target.value })}
+                        onChange={(e) =>
+                          setNewGallery({ ...newGallery, title: e.target.value })
+                        }
                       />
                     </div>
                     <div className="col-4">
-                      <label className="form-label small text-warning mb-1">أيقونة / إيموجي</label>
+                      <label className="form-label small text-warning mb-1">
+                        أيقونة / إيموجي
+                      </label>
                       <select
                         className="form-select bg-dark text-white border-secondary"
                         value={newGallery.icon}
-                        onChange={(e) => setNewGallery({ ...newGallery, icon: e.target.value })}
+                        onChange={(e) =>
+                          setNewGallery({ ...newGallery, icon: e.target.value })
+                        }
                       >
                         <option value="🏕️">🏕️ مخيم</option>
                         <option value="⛺">⛺ خيمة</option>
@@ -655,14 +772,29 @@ export default function AdminDashboard() {
                   </div>
 
                   <div className="mb-2">
-                    <label className="form-label small text-warning mb-1">اختر صورة من الهاتف</label>
+                    <label className="form-label small text-warning mb-1">
+                      رابط صورة مباشر (URL) أو اختر ملفاً صغيراً
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control bg-dark text-white border-secondary mb-2"
+                      placeholder="https://..."
+                      value={newGallery.image}
+                      onChange={(e) =>
+                        setNewGallery({ ...newGallery, image: e.target.value })
+                      }
+                    />
                     <input
                       type="file"
                       accept="image/*"
                       className="form-control bg-dark text-white border-secondary"
                       required={!newGallery.image}
                       onChange={(e) =>
-                        handleFileChange(e, (img) => setNewGallery({ ...newGallery, image: img }))
+                        handleFileChange(
+                          e,
+                          (img) => setNewGallery({ ...newGallery, image: img }),
+                          (msg) => setGalleryNotice(msg)
+                        )
                       }
                     />
                   </div>
@@ -679,35 +811,43 @@ export default function AdminDashboard() {
                   )}
 
                   <div className="mb-2">
-                    <label className="form-label small text-warning mb-1">وصف مختصر يظهر على الكارت</label>
+                    <label className="form-label small text-warning mb-1">
+                      وصف مختصر يظهر على الكارت
+                    </label>
                     <input
                       type="text"
                       className="form-control bg-dark text-white border-secondary"
                       placeholder="جملة قصيرة تصف الفعالية"
                       required
                       value={newGallery.shortDesc}
-                      onChange={(e) => setNewGallery({ ...newGallery, shortDesc: e.target.value })}
+                      onChange={(e) =>
+                        setNewGallery({ ...newGallery, shortDesc: e.target.value })
+                      }
                     />
                   </div>
 
                   <div className="mb-3">
-                    <label className="form-label small text-warning mb-1">تفاصيل الفعالية الكاملة</label>
+                    <label className="form-label small text-warning mb-1">
+                      تفاصيل الفعالية الكاملة
+                    </label>
                     <textarea
                       className="form-control bg-dark text-white border-secondary"
                       rows="3"
                       placeholder="اكتب ملخصاً أو تفاصيل إضافية تظهر عند فتح الفعالية"
                       required
                       value={newGallery.details}
-                      onChange={(e) => setNewGallery({ ...newGallery, details: e.target.value })}
+                      onChange={(e) =>
+                        setNewGallery({ ...newGallery, details: e.target.value })
+                      }
                     ></textarea>
                   </div>
 
                   <button type="submit" className="btn btn-gold w-100">
                     + إضافة للمعرض
                   </button>
-                  {galleryAdded && (
+                  {galleryNotice && (
                     <div className="text-warning small fw-bold text-center mt-2">
-                      ✅ تمت إضافة الفعالية للمعرض!
+                      {galleryNotice}
                     </div>
                   )}
                 </form>
@@ -740,7 +880,7 @@ export default function AdminDashboard() {
                         </div>
                       </div>
                       <button
-                        onClick={() => deleteGalleryItem(g.id)}
+                        onClick={() => handleDeleteGallery(g.id)}
                         className="btn btn-outline-danger btn-sm"
                       >
                         حذف
@@ -756,6 +896,9 @@ export default function AdminDashboard() {
         {activeTab === "requests" && (
           <div className="card rover-card p-4">
             <h5 className="fw-bold text-warning mb-3">طلبات الانضمام الواردة</h5>
+            {requestNotice && (
+              <div className="alert alert-warning py-2 small">{requestNotice}</div>
+            )}
             <div className="table-responsive">
               <table className="table table-dark table-hover align-middle">
                 <thead>
@@ -791,7 +934,7 @@ export default function AdminDashboard() {
                         <select
                           className="form-select form-select-sm bg-black text-white border-secondary"
                           value={req.status}
-                          onChange={(e) => updateRequestStatus(req.id, e.target.value)}
+                          onChange={(e) => handleUpdateStatus(req.id, e.target.value)}
                         >
                           <option>جديد</option>
                           <option>تم التواصل</option>
@@ -808,30 +951,41 @@ export default function AdminDashboard() {
 
         {activeTab === "branding" && (
           <div className="row g-4">
-            <div className="col-lg-6">
+            <div className="col-md-6">
               <div className="card rover-card p-4 h-100">
-                <h5 className="fw-bold text-warning mb-3">تحديث شعار العشيرة</h5>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    updateLogoUrl(logoInput);
-                    setLogoSaved(true);
-                    setTimeout(() => setLogoSaved(false), 3000);
-                  }}
-                >
-                  <label className="form-label small text-warning">اختر صورة الشعار من الهاتف</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="form-control bg-dark text-white border-secondary mb-3"
-                    onChange={(e) => handleFileChange(e, (img) => setLogoInput(img), 400, 0.8)}
-                  />
+                <h5 className="fw-bold text-warning mb-3">شعار العشيرة (Logo)</h5>
+                <form onSubmit={handleSaveLogo}>
+                  <div className="mb-3">
+                    <label className="form-label small text-warning">
+                      رابط الشعار (/rover-logo.svg أو رابط صورة)
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control bg-dark text-white border-secondary mb-2"
+                      value={logoInput}
+                      onChange={(e) => setLogoInput(e.target.value)}
+                    />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="form-control bg-dark text-white border-secondary"
+                      onChange={(e) =>
+                        handleFileChange(
+                          e,
+                          (img) => setLogoInput(img),
+                          (msg) => setLogoError(msg),
+                          320,
+                          0.45
+                        )
+                      }
+                    />
+                  </div>
                   {logoInput && (
                     <div className="mb-3 text-center">
                       <img
                         src={logoInput}
-                        alt="الشعار"
-                        className="rounded-3 border border-warning"
+                        alt="معاينة الشعار"
+                        className="img-fluid rounded-3 border border-warning p-1"
                         style={{ maxHeight: "90px", objectFit: "contain" }}
                       />
                     </div>
@@ -840,62 +994,106 @@ export default function AdminDashboard() {
                     حفظ الشعار
                   </button>
                   {logoSaved && (
-                    <div className="text-warning small fw-bold text-center mt-2">✅ تم حفظ الشعار!</div>
+                    <div className="text-warning small fw-bold text-center mt-2">
+                      ✅ تم حفظ الشعار!
+                    </div>
+                  )}
+                  {logoError && (
+                    <div className="text-danger small fw-bold text-center mt-2">
+                      {logoError}
+                    </div>
                   )}
                 </form>
               </div>
             </div>
 
-            <div className="col-lg-6">
+            <div className="col-md-6">
               <div className="card rover-card p-4 h-100">
-                <h5 className="fw-bold text-warning mb-3">تحديث خلفية الهيرو</h5>
+                <h5 className="fw-bold text-warning mb-3">خلفية قسم الهيرو</h5>
                 <form onSubmit={handleSaveHeroBg}>
-                  <label className="form-label small text-warning">اختر صورة الخلفية من الهاتف</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="form-control bg-dark text-white border-secondary mb-3"
-                    onChange={(e) => {
-                      setHeroBgError("");
-                      handleFileChange(e, (img) => setHeroBgInput(img), 800, 0.68);
-                    }}
-                  />
+                  <div className="mb-3">
+                    <label className="form-label small text-warning">
+                      رابط صورة الخلفية (URL) أو ملف صغير جداً
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control bg-dark text-white border-secondary mb-2"
+                      placeholder="https://..."
+                      value={heroBgInput}
+                      onChange={(e) => setHeroBgInput(e.target.value)}
+                    />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="form-control bg-dark text-white border-secondary"
+                      onChange={(e) =>
+                        handleFileChange(
+                          e,
+                          (img) => setHeroBgInput(img),
+                          (msg) => setHeroBgError(msg),
+                          480,
+                          0.4
+                        )
+                      }
+                    />
+                  </div>
                   {heroBgInput && (
                     <div className="mb-3 text-center">
                       <img
                         src={heroBgInput}
-                        alt="خلفية الهيرو"
+                        alt="معاينة خلفية الهيرو"
                         className="img-fluid rounded-3 border border-warning"
-                        style={{ maxHeight: "110px", objectFit: "cover" }}
+                        style={{ maxHeight: "120px", objectFit: "cover" }}
                       />
                     </div>
                   )}
-                  {heroBgError && (
-                    <div className="alert alert-danger py-2 small text-center mb-2">
-                      {heroBgError}
+                  <div className="d-flex gap-2">
+                    <button type="submit" className="btn btn-gold flex-grow-1">
+                      حفظ الخلفية
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline-gold"
+                      onClick={() => setHeroBgInput("")}
+                    >
+                      تفريغ
+                    </button>
+                  </div>
+                  {heroBgSaved && (
+                    <div className="text-warning small fw-bold text-center mt-2">
+                      ✅ تم حفظ خلفية الهيرو!
                     </div>
                   )}
-                  <button type="submit" className="btn btn-gold w-100">
-                    حفظ الخلفية
-                  </button>
-                  {heroBgSaved && (
-                    <div className="text-warning small fw-bold text-center mt-2">✅ تم حفظ الخلفية!</div>
+                  {heroBgError && (
+                    <div className="text-danger small fw-bold text-center mt-2">
+                      {heroBgError}
+                    </div>
                   )}
                 </form>
               </div>
             </div>
+
+            <div className="col-12">
+              <div className="card rover-card p-4 border-danger border-opacity-50">
+                <h6 className="fw-bold text-danger mb-2">إعادة ضبط البيانات</h6>
+                <p className="text-secondary small mb-3">
+                  لو حجم البيانات على JSONBin ممتلئ بصور قديمة، يمكنك إعادة ضبط البيانات وتفريغ السحابة ثم البدء بروابط صور خفيفة.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-outline-danger btn-sm"
+                  onClick={async () => {
+                    if (window.confirm("هل أنت متأكد من إعادة ضبط بيانات الموقع؟")) {
+                      await resetToDefault();
+                    }
+                  }}
+                >
+                  إعادة ضبط إلى البيانات الفارغة
+                </button>
+              </div>
+            </div>
           </div>
         )}
-
-        <div className="mt-5 pt-3 border-top border-secondary text-end">
-          <button
-            type="button"
-            onClick={resetToDefault}
-            className="btn btn-outline-danger btn-sm"
-          >
-            إعادة ضبط البيانات الافتراضية
-          </button>
-        </div>
       </div>
     </div>
   );
