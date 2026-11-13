@@ -3,9 +3,9 @@ const ACCESS_KEY = (import.meta.env.VITE_JSONBIN_ACCESS_KEY || "").trim();
 
 export const isCloudConfigured = Boolean(
   BIN_ID &&
-    ACCESS_KEY &&
-    !BIN_ID.includes("YOUR_") &&
-    !ACCESS_KEY.includes("YOUR_")
+  ACCESS_KEY &&
+  !BIN_ID.includes("YOUR_") &&
+  !ACCESS_KEY.includes("YOUR_"),
 );
 
 const BASE_URL = BIN_ID ? `https://api.jsonbin.io/v3/b/${BIN_ID}` : "";
@@ -20,6 +20,36 @@ function buildHeaders(includeJson = false) {
   return headers;
 }
 
+async function parseErrorResponse(res, fallbackPrefix) {
+  let detail = "";
+  try {
+    const text = await res.text();
+    if (text) {
+      try {
+        const parsed = JSON.parse(text);
+        detail = parsed?.message || parsed?.error || text;
+      } catch {
+        detail = text;
+      }
+    }
+  } catch {
+    detail = "";
+  }
+
+  const cleanDetail = String(detail || "").trim();
+  const fullMessage = cleanDetail
+    ? `${fallbackPrefix} (${res.status}): ${cleanDetail}`
+    : `${fallbackPrefix} (${res.status})`;
+
+  console.error("[cloudStore]", fullMessage, {
+    status: res.status,
+    binId: BIN_ID ? `${BIN_ID.slice(0, 6)}...` : "missing",
+    hasAccessKey: Boolean(ACCESS_KEY),
+  });
+
+  return new Error(fullMessage);
+}
+
 export async function fetchRemoteSiteData() {
   if (!isCloudConfigured || !BASE_URL) {
     return { configured: false, data: null };
@@ -31,7 +61,7 @@ export async function fetchRemoteSiteData() {
   });
 
   if (!res.ok) {
-    throw new Error(`فشل جلب البيانات من السحابة (${res.status})`);
+    throw await parseErrorResponse(res, "فشل جلب البيانات من السحابة");
   }
 
   const json = await res.json();
@@ -44,17 +74,19 @@ export async function saveRemoteSiteData(siteData) {
     return { configured: false };
   }
 
+  const payloadBody = JSON.stringify({
+    siteData,
+    updatedAt: new Date().toISOString(),
+  });
+
   const res = await fetch(BASE_URL, {
     method: "PUT",
     headers: buildHeaders(true),
-    body: JSON.stringify({
-      siteData,
-      updatedAt: new Date().toISOString(),
-    }),
+    body: payloadBody,
   });
 
   if (!res.ok) {
-    throw new Error(`فشل حفظ التعديلات على السحابة (${res.status})`);
+    throw await parseErrorResponse(res, "فشل حفظ التعديلات على السحابة");
   }
 
   return { configured: true };
