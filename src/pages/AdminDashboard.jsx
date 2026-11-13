@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useSite } from "../context/SiteContext";
+import { pickFileFromDevice } from "../lib/imageFile";
 
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "rover2026";
 
@@ -40,7 +41,7 @@ const EMPTY_EVENT = {
   date: "2027-02-10T10:00",
   location: "كلية العلوم - جامعة عين شمس",
   description: "",
-  image: "https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=1000&q=80",
+  image: "",
 };
 
 export default function AdminDashboard() {
@@ -84,7 +85,7 @@ export default function AdminDashboard() {
     icon: "🏕️",
     shortDesc: "",
     details: "",
-    image: "https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=1000&q=80",
+    image: "",
   });
   const [galleryAdded, setGalleryAdded] = useState(false);
 
@@ -92,6 +93,18 @@ export default function AdminDashboard() {
     setLogoInput(siteData.logoUrl || "/rover-logo.svg");
     setHeroBgInput(siteData.heroBackgroundUrl || "");
   }, [siteData.logoUrl, siteData.heroBackgroundUrl]);
+
+  const handleFileChange = async (e, onPicked, maxWidth = 900) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const base64 = await pickFileFromDevice(file, maxWidth);
+      onPicked(base64);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
 
   const applyTemplate = (tpl) => {
     setNewGallery({
@@ -135,7 +148,7 @@ export default function AdminDashboard() {
     e.preventDefault();
     updateUpcomingEvent(editingEventId, editEventForm);
     setEditingEventId(null);
-    setEventNotice("✅ تم تحديث بيانات الحدث ومزامنتها سحابياً!");
+    setEventNotice("✅ تم تحديث بيانات الحدث!");
     setTimeout(() => setEventNotice(""), 3000);
   };
 
@@ -143,7 +156,7 @@ export default function AdminDashboard() {
     e.preventDefault();
     addUpcomingEvent(newEventForm);
     setNewEventForm(EMPTY_EVENT);
-    setEventNotice("✅ تمت إضافة الحدث الجديد ومزامنته سحابياً!");
+    setEventNotice("✅ تمت إضافة الحدث الجديد!");
     setTimeout(() => setEventNotice(""), 3000);
   };
 
@@ -188,12 +201,12 @@ export default function AdminDashboard() {
           {isCloudEnabled ? (
             <span className="badge bg-success px-3 py-2">
               <i className="bi bi-cloud-check-fill me-1"></i>
-              {isSyncing ? "جاري المزامنة..." : "متصل بـ JSONBin السحابي (تحديث للجميع)"}
+              {isSyncing ? "جاري المزامنة..." : "متصل بـ JSONBin السحابي"}
             </span>
           ) : (
             <span className="badge bg-warning text-dark px-3 py-2">
               <i className="bi bi-exclamation-triangle-fill me-1"></i>
-              وضع محلي فقط (أضف مفاتيح JSONBin في .env للتعميم على الجميع)
+              وضع محلي فقط
             </span>
           )}
         </div>
@@ -219,12 +232,6 @@ export default function AdminDashboard() {
       </nav>
 
       <div className="container py-4">
-        {!isCloudEnabled && (
-          <div className="alert alert-dark border border-warning text-light mb-4 small">
-            <strong className="text-warning">معلومة مهمة للتعميم على كل الناس:</strong> عشان أي تعديل هنا يظهر لكل الزوار على أي جهاز حتى بعد فترات توقف، اربط المشروع بـ <strong>JSONBin.io</strong> بإضافة <code>VITE_JSONBIN_BIN_ID</code> و <code>VITE_JSONBIN_ACCESS_KEY</code> في ملف <code>.env</code> وفي إعدادات Vercel.
-          </div>
-        )}
-
         {lastSyncError && (
           <div className="alert alert-danger small mb-4">
             تنبيه المزامنة: {lastSyncError}
@@ -327,18 +334,29 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="mb-2">
-                      <label className="form-label small text-warning">رابط صورة الحدث (صفحة الصورة)</label>
+                      <label className="form-label small text-warning">اختر صورة من الهاتف</label>
                       <input
-                        type="text"
+                        type="file"
+                        accept="image/*"
                         className="form-control bg-dark text-white border-secondary"
-                        dir="ltr"
-                        required
-                        value={editEventForm.image}
                         onChange={(e) =>
-                          setEditEventForm({ ...editEventForm, image: e.target.value })
+                          handleFileChange(e, (img) =>
+                            setEditEventForm({ ...editEventForm, image: img })
+                          )
                         }
                       />
                     </div>
+
+                    {editEventForm.image && (
+                      <div className="mb-2 text-center">
+                        <img
+                          src={editEventForm.image}
+                          alt="معاينة"
+                          className="img-fluid rounded-3 border border-warning"
+                          style={{ maxHeight: "110px", objectFit: "cover" }}
+                        />
+                      </div>
+                    )}
 
                     <div className="mb-3">
                       <label className="form-label small text-warning">وصف الحدث</label>
@@ -421,16 +439,16 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="mb-2">
-                      <label className="form-label small text-warning">رابط صورة الحدث (صفحة الصورة)</label>
+                      <label className="form-label small text-warning">اختر صورة من الهاتف</label>
                       <input
-                        type="text"
+                        type="file"
+                        accept="image/*"
                         className="form-control bg-dark text-white border-secondary"
-                        dir="ltr"
-                        placeholder="https://..."
-                        required
-                        value={newEventForm.image}
+                        required={!newEventForm.image}
                         onChange={(e) =>
-                          setNewEventForm({ ...newEventForm, image: e.target.value })
+                          handleFileChange(e, (img) =>
+                            setNewEventForm({ ...newEventForm, image: img })
+                          )
                         }
                       />
                     </div>
@@ -442,9 +460,6 @@ export default function AdminDashboard() {
                           alt="معاينة صورة الحدث"
                           className="img-fluid rounded-3 border border-warning"
                           style={{ maxHeight: "110px", objectFit: "cover" }}
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                          }}
                         />
                       </div>
                     )}
@@ -541,7 +556,7 @@ export default function AdminDashboard() {
               <div className="card rover-card p-4">
                 <h5 className="fw-bold text-warning mb-2">إضافة فعالية جديدة للمعرض</h5>
                 <p className="text-secondary small mb-3">
-                  اختر قالباً جاهزاً لتعبئة الحقول بسرعة وعدّله حسب الفعالية، أو اكتب البيانات يدوياً:
+                  اختر قالباً جاهزاً أو اكتب البيانات واختر الصورة من هاتفك:
                 </p>
 
                 <div className="d-flex flex-wrap gap-2 mb-3">
@@ -566,7 +581,7 @@ export default function AdminDashboard() {
                       icon: "🏕️",
                       shortDesc: "",
                       details: "",
-                      image: "https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=1000&q=80",
+                      image: "",
                     });
                     setGalleryAdded(true);
                     setTimeout(() => setGalleryAdded(false), 3000);
@@ -602,15 +617,15 @@ export default function AdminDashboard() {
                   </div>
 
                   <div className="mb-2">
-                    <label className="form-label small text-warning mb-1">رابط الصورة (URL)</label>
+                    <label className="form-label small text-warning mb-1">اختر صورة من الهاتف</label>
                     <input
-                      type="text"
+                      type="file"
+                      accept="image/*"
                       className="form-control bg-dark text-white border-secondary"
-                      dir="ltr"
-                      placeholder="https://... أو /rover-logo.svg"
-                      required
-                      value={newGallery.image}
-                      onChange={(e) => setNewGallery({ ...newGallery, image: e.target.value })}
+                      required={!newGallery.image}
+                      onChange={(e) =>
+                        handleFileChange(e, (img) => setNewGallery({ ...newGallery, image: img }))
+                      }
                     />
                   </div>
 
@@ -621,9 +636,6 @@ export default function AdminDashboard() {
                         alt="معاينة الصورة"
                         className="img-fluid rounded-3 border border-warning"
                         style={{ maxHeight: "120px", objectFit: "cover" }}
-                        onError={(e) => {
-                          e.currentTarget.style.display = "none";
-                        }}
                       />
                     </div>
                   )}
@@ -657,7 +669,7 @@ export default function AdminDashboard() {
                   </button>
                   {galleryAdded && (
                     <div className="text-warning small fw-bold text-center mt-2">
-                      ✅ تمت إضافة الفعالية للمعرض ومزامنتها!
+                      ✅ تمت إضافة الفعالية للمعرض!
                     </div>
                   )}
                 </form>
@@ -674,12 +686,14 @@ export default function AdminDashboard() {
                       className="list-group-item bg-dark text-light border-secondary d-flex justify-content-between align-items-center"
                     >
                       <div className="d-flex align-items-center gap-3">
-                        <img
-                          src={g.image}
-                          alt={g.title}
-                          className="rounded-2 border border-warning"
-                          style={{ width: "56px", height: "56px", objectFit: "cover" }}
-                        />
+                        {g.image && (
+                          <img
+                            src={g.image}
+                            alt={g.title}
+                            className="rounded-2 border border-warning"
+                            style={{ width: "56px", height: "56px", objectFit: "cover" }}
+                          />
+                        )}
                         <div>
                           <strong className="text-warning">
                             {g.icon} {g.title}
@@ -758,7 +772,7 @@ export default function AdminDashboard() {
           <div className="row g-4">
             <div className="col-lg-6">
               <div className="card rover-card p-4 h-100">
-                <h5 className="fw-bold text-warning mb-3">تحديث شعار العشيرة (وأيقونة المتصفح)</h5>
+                <h5 className="fw-bold text-warning mb-3">تحديث شعار العشيرة</h5>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -767,85 +781,66 @@ export default function AdminDashboard() {
                     setTimeout(() => setLogoSaved(false), 3000);
                   }}
                 >
-                  <label className="form-label">مسار أو رابط صورة الشعار</label>
+                  <label className="form-label small text-warning">اختر صورة الشعار من الهاتف</label>
                   <input
-                    type="text"
+                    type="file"
+                    accept="image/*"
                     className="form-control bg-dark text-white border-secondary mb-3"
-                    dir="ltr"
-                    value={logoInput}
-                    onChange={(e) => setLogoInput(e.target.value)}
-                    placeholder="/rover-logo.svg أو https://..."
+                    onChange={(e) => handleFileChange(e, (img) => setLogoInput(img), 400)}
                   />
                   {logoInput && (
-                    <div className="mb-3">
+                    <div className="mb-3 text-center">
                       <img
                         src={logoInput}
-                        alt="معاينة الشعار"
-                        className="rounded-circle border border-warning"
-                        style={{ width: "72px", height: "72px", objectFit: "cover" }}
+                        alt="الشعار"
+                        className="rounded-3 border border-warning"
+                        style={{ maxHeight: "90px", objectFit: "contain" }}
                       />
                     </div>
                   )}
-                  <button type="submit" className="btn btn-gold px-4">
+                  <button type="submit" className="btn btn-gold w-100">
                     حفظ الشعار
                   </button>
-                  {logoSaved && <span className="text-warning fw-bold ms-3">✅ تم تحديث الشعار!</span>}
+                  {logoSaved && (
+                    <div className="text-warning small fw-bold text-center mt-2">✅ تم حفظ الشعار!</div>
+                  )}
                 </form>
               </div>
             </div>
 
             <div className="col-lg-6">
               <div className="card rover-card p-4 h-100">
-                <h5 className="fw-bold text-warning mb-3">خلفية قسم اسم العشيرة وزر "انضم إلينا"</h5>
+                <h5 className="fw-bold text-warning mb-3">تحديث خلفية الهيرو</h5>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    updateHeroBackgroundUrl(heroBgInput.trim());
+                    updateHeroBackgroundUrl(heroBgInput);
                     setHeroBgSaved(true);
                     setTimeout(() => setHeroBgSaved(false), 3000);
                   }}
                 >
-                  <label className="form-label">رابط صورة الخلفية (اتركه فارغاً للخلفية الكحلي الافتراضية)</label>
+                  <label className="form-label small text-warning">اختر صورة الخلفية من الهاتف</label>
                   <input
-                    type="text"
+                    type="file"
+                    accept="image/*"
                     className="form-control bg-dark text-white border-secondary mb-3"
-                    dir="ltr"
-                    value={heroBgInput}
-                    onChange={(e) => setHeroBgInput(e.target.value)}
-                    placeholder="https://images.unsplash.com/..."
+                    onChange={(e) => handleFileChange(e, (img) => setHeroBgInput(img), 1100)}
                   />
                   {heroBgInput && (
-                    <div className="mb-3">
+                    <div className="mb-3 text-center">
                       <img
                         src={heroBgInput}
-                        alt="معاينة خلفية الهيرو"
+                        alt="خلفية الهيرو"
                         className="img-fluid rounded-3 border border-warning"
-                        style={{ maxHeight: "140px", width: "100%", objectFit: "cover" }}
-                        onError={(e) => {
-                          e.currentTarget.style.display = "none";
-                        }}
+                        style={{ maxHeight: "110px", objectFit: "cover" }}
                       />
                     </div>
                   )}
-                  <div className="d-flex gap-2 flex-wrap">
-                    <button type="submit" className="btn btn-gold px-4">
-                      حفظ خلفية الهيرو
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline-gold btn-sm"
-                      onClick={() => {
-                        setHeroBgInput("");
-                        updateHeroBackgroundUrl("");
-                        setHeroBgSaved(true);
-                        setTimeout(() => setHeroBgSaved(false), 3000);
-                      }}
-                    >
-                      إزالة الصورة
-                    </button>
-                  </div>
+                  <button type="submit" className="btn btn-gold w-100">
+                    حفظ الخلفية
+                  </button>
                   {heroBgSaved && (
-                    <div className="text-warning fw-bold small mt-2">✅ تم تحديث خلفية القسم الأول!</div>
+                    <div className="text-warning small fw-bold text-center mt-2">✅ تم حفظ الخلفية!</div>
                   )}
                 </form>
               </div>
@@ -853,8 +848,12 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        <div className="text-end mt-4">
-          <button onClick={resetToDefault} className="btn btn-outline-gold btn-sm">
+        <div className="mt-5 pt-3 border-top border-secondary text-end">
+          <button
+            type="button"
+            onClick={resetToDefault}
+            className="btn btn-outline-danger btn-sm"
+          >
             إعادة ضبط البيانات الافتراضية
           </button>
         </div>
