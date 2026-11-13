@@ -1,5 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
-import { defaultSiteData } from "../data/defaultSiteData";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+} from "react";
 import {
   isCloudConfigured,
   fetchRemoteSiteData,
@@ -8,75 +14,60 @@ import {
 
 const SiteContext = createContext();
 
-const LOCAL_CACHE_KEY = "rover_site_data_cache_v1";
-const DELETED_EVENTS_KEY = "rover_deleted_event_ids_v1";
+const LOCAL_CACHE_KEY = "rover_site_data_cache_v2";
 const POLL_INTERVAL_MS = 12000;
 
-function readDeletedEventIds() {
-  try {
-    const raw = localStorage.getItem(DELETED_EVENTS_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeDeletedEventIds(ids) {
-  try {
-    localStorage.setItem(DELETED_EVENTS_KEY, JSON.stringify(Array.from(new Set(ids.map(String)))));
-  } catch {
-    // تجاهل
-  }
-}
-
-function normalizeSiteData(raw, deletedIds = []) {
+function normalizeSiteData(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
-  const deletedSet = new Set((deletedIds || []).map(String));
 
-  const hasEventsArray = Array.isArray(src.upcomingEvents);
-  const eventsSource = hasEventsArray ? src.upcomingEvents : defaultSiteData.upcomingEvents;
+  const upcomingEvents = Array.isArray(src.upcomingEvents)
+    ? src.upcomingEvents.map((ev, idx) => ({
+        id: ev?.id ?? `${Date.now()}-${idx}`,
+        active: ev?.active !== false,
+        title: typeof ev?.title === "string" ? ev.title : "",
+        date: typeof ev?.date === "string" ? ev.date : "",
+        location: typeof ev?.location === "string" ? ev.location : "",
+        description:
+          typeof ev?.description === "string"
+            ? ev.description
+            : typeof ev?.shortDesc === "string"
+              ? ev.shortDesc
+              : "",
+        shortDesc:
+          typeof ev?.shortDesc === "string"
+            ? ev.shortDesc
+            : typeof ev?.description === "string"
+              ? ev.description
+              : "",
+        image: typeof ev?.image === "string" ? ev.image : "",
+      }))
+    : [];
 
-  const normalizedEvents = eventsSource
-    .filter((ev) => ev && !deletedSet.has(String(ev.id)))
-    .map((ev, idx) => ({
-      id: ev?.id ?? `${Date.now()}-${idx}`,
-      active: ev?.active !== false,
-      title: ev?.title || "فعالية كشفية قادمة",
-      date: ev?.date || "2027-02-10T10:00",
-      location: ev?.location || "كلية العلوم - جامعة عين شمس",
-      description: ev?.description || ev?.shortDesc || "",
-      shortDesc: ev?.shortDesc || ev?.description || "",
-      image: typeof ev?.image === "string" ? ev.image : "",
-    }));
+  const gallery = Array.isArray(src.gallery)
+    ? src.gallery.map((item, idx) => ({
+        id: item?.id ?? `${Date.now()}-g-${idx}`,
+        title: typeof item?.title === "string" ? item.title : "",
+        icon: typeof item?.icon === "string" ? item.icon : "🏕️",
+        shortDesc: typeof item?.shortDesc === "string" ? item.shortDesc : "",
+        details:
+          typeof item?.details === "string"
+            ? item.details
+            : typeof item?.shortDesc === "string"
+              ? item.shortDesc
+              : "",
+        image: typeof item?.image === "string" ? item.image : "",
+      }))
+    : [];
 
-  const hasGalleryArray = Array.isArray(src.gallery);
-  const gallerySource = hasGalleryArray ? src.gallery : defaultSiteData.gallery;
-  const normalizedGallery = gallerySource.map((item, idx) => ({
-    id: item?.id ?? `${Date.now()}-g-${idx}`,
-    title: item?.title || "فعالية كشفية",
-    icon: item?.icon || "🏕️",
-    shortDesc: item?.shortDesc || "",
-    details: item?.details || item?.shortDesc || "",
-    image: typeof item?.image === "string" ? item.image : "",
-  }));
-
-  const hasRequestsArray = Array.isArray(src.joinRequests);
-  const requestsSource = hasRequestsArray
-    ? src.joinRequests
-    : defaultSiteData.joinRequests;
-
-  const rawLogo = typeof src.logoUrl === "string" ? src.logoUrl.trim() : "";
-  const rawHero =
-    typeof src.heroBackgroundUrl === "string" ? src.heroBackgroundUrl.trim() : "";
+  const joinRequests = Array.isArray(src.joinRequests) ? src.joinRequests : [];
 
   return {
-    logoUrl: rawLogo || defaultSiteData.logoUrl,
+    logoUrl: typeof src.logoUrl === "string" ? src.logoUrl : "",
     heroBackgroundUrl:
-      src.heroBackgroundUrl === "" ? "" : rawHero || defaultSiteData.heroBackgroundUrl,
-    upcomingEvents: normalizedEvents,
-    gallery: normalizedGallery,
-    joinRequests: requestsSource,
+      typeof src.heroBackgroundUrl === "string" ? src.heroBackgroundUrl : "",
+    upcomingEvents,
+    gallery,
+    joinRequests,
   };
 }
 
@@ -84,7 +75,7 @@ function readLocalCache() {
   try {
     const raw = localStorage.getItem(LOCAL_CACHE_KEY);
     if (!raw) return null;
-    return normalizeSiteData(JSON.parse(raw), readDeletedEventIds());
+    return normalizeSiteData(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -99,7 +90,7 @@ function writeLocalCache(data) {
       const lighter = {
         ...data,
         heroBackgroundUrl: data.heroBackgroundUrl?.startsWith("data:")
-          ? defaultSiteData.heroBackgroundUrl
+          ? ""
           : data.heroBackgroundUrl,
         upcomingEvents: (data.upcomingEvents || []).map((ev) => ({
           ...ev,
@@ -118,9 +109,17 @@ function writeLocalCache(data) {
   }
 }
 
+const EMPTY_SITE_DATA = {
+  logoUrl: "",
+  heroBackgroundUrl: "",
+  upcomingEvents: [],
+  gallery: [],
+  joinRequests: [],
+};
+
 export function SiteProvider({ children }) {
   const [siteData, setSiteData] = useState(() => {
-    return readLocalCache() || normalizeSiteData(defaultSiteData, readDeletedEventIds());
+    return readLocalCache() || EMPTY_SITE_DATA;
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncError, setLastSyncError] = useState("");
@@ -139,22 +138,21 @@ export function SiteProvider({ children }) {
       if (isSavingRef.current) return;
 
       if (remote && remote.data && typeof remote.data === "object") {
-        const normalized = normalizeSiteData(remote.data, readDeletedEventIds());
+        const normalized = normalizeSiteData(remote.data);
         siteDataRef.current = normalized;
         setSiteData(normalized);
         writeLocalCache(normalized);
         setLastSyncError("");
       } else if (remote && remote.isEmpty) {
-        const seed = normalizeSiteData(
-          siteDataRef.current || defaultSiteData,
-          readDeletedEventIds()
-        );
+        const seed = normalizeSiteData(siteDataRef.current || EMPTY_SITE_DATA);
         await saveRemoteSiteData(seed);
         setLastSyncError("");
       }
     } catch (err) {
       if (!isSavingRef.current) {
-        setLastSyncError(err?.message || "تعذر الاتصال بقاعدة البيانات السحابية");
+        setLastSyncError(
+          err?.message || "تعذر الاتصال بقاعدة البيانات السحابية",
+        );
       }
     } finally {
       if (!silent) setIsSyncing(false);
@@ -179,10 +177,10 @@ export function SiteProvider({ children }) {
   }, [refreshFromCloud]);
 
   const commitState = useCallback(async (updater) => {
-    const prevNormalized = normalizeSiteData(siteDataRef.current, readDeletedEventIds());
+    const prevNormalized = normalizeSiteData(siteDataRef.current);
     const computed =
       typeof updater === "function" ? updater(prevNormalized) : updater;
-    const nextNormalized = normalizeSiteData(computed, readDeletedEventIds());
+    const nextNormalized = normalizeSiteData(computed);
 
     siteDataRef.current = nextNormalized;
     setSiteData(nextNormalized);
@@ -215,35 +213,31 @@ export function SiteProvider({ children }) {
     (logoUrl) => {
       return commitState((prev) => ({
         ...prev,
-        logoUrl: String(logoUrl || "").trim() || defaultSiteData.logoUrl,
+        logoUrl: typeof logoUrl === "string" ? logoUrl.trim() : "",
       }));
     },
-    [commitState]
+    [commitState],
   );
 
   const updateHeroBackgroundUrl = useCallback(
     (heroBackgroundUrl) => {
-      const cleaned = String(heroBackgroundUrl || "").trim();
       return commitState((prev) => ({
         ...prev,
-        heroBackgroundUrl: cleaned || defaultSiteData.heroBackgroundUrl,
+        heroBackgroundUrl:
+          typeof heroBackgroundUrl === "string" ? heroBackgroundUrl.trim() : "",
       }));
     },
-    [commitState]
+    [commitState],
   );
 
   const addUpcomingEvent = useCallback(
     (newEvent) => {
-      const id = Date.now();
-      const updatedDeleted = readDeletedEventIds().filter((x) => x !== String(id));
-      writeDeletedEventIds(updatedDeleted);
-
       const created = {
-        id,
+        id: Date.now(),
         active: newEvent?.active !== false,
-        title: newEvent?.title || "فعالية كشفية قادمة",
-        date: newEvent?.date || "2027-02-10T10:00",
-        location: newEvent?.location || "كلية العلوم - جامعة عين شمس",
+        title: newEvent?.title || "",
+        date: newEvent?.date || "",
+        location: newEvent?.location || "",
         description: newEvent?.description || "",
         shortDesc: newEvent?.description || "",
         image: typeof newEvent?.image === "string" ? newEvent.image : "",
@@ -254,7 +248,7 @@ export function SiteProvider({ children }) {
         upcomingEvents: [created, ...prev.upcomingEvents],
       }));
     },
-    [commitState]
+    [commitState],
   );
 
   const updateUpcomingEvent = useCallback(
@@ -271,33 +265,30 @@ export function SiteProvider({ children }) {
                     ? updatedFields.description
                     : ev.shortDesc,
               }
-            : ev
+            : ev,
         ),
       }));
     },
-    [commitState]
+    [commitState],
   );
 
   const deleteUpcomingEvent = useCallback(
     (id) => {
-      const nextDeleted = [...readDeletedEventIds(), String(id)];
-      writeDeletedEventIds(nextDeleted);
-
       return commitState((prev) => ({
         ...prev,
         upcomingEvents: prev.upcomingEvents.filter(
-          (ev) => String(ev.id) !== String(id)
+          (ev) => String(ev.id) !== String(id),
         ),
       }));
     },
-    [commitState]
+    [commitState],
   );
 
   const addGalleryItem = useCallback(
     (item) => {
       const created = {
         id: Date.now(),
-        title: item?.title || "فعالية كشفية",
+        title: item?.title || "",
         icon: item?.icon || "🏕️",
         shortDesc: item?.shortDesc || "",
         details: item?.details || item?.shortDesc || "",
@@ -309,7 +300,7 @@ export function SiteProvider({ children }) {
         gallery: [created, ...prev.gallery],
       }));
     },
-    [commitState]
+    [commitState],
   );
 
   const deleteGalleryItem = useCallback(
@@ -319,7 +310,7 @@ export function SiteProvider({ children }) {
         gallery: prev.gallery.filter((item) => String(item.id) !== String(id)),
       }));
     },
-    [commitState]
+    [commitState],
   );
 
   const addJoinRequest = useCallback(
@@ -336,7 +327,7 @@ export function SiteProvider({ children }) {
         joinRequests: [created, ...prev.joinRequests],
       }));
     },
-    [commitState]
+    [commitState],
   );
 
   const updateRequestStatus = useCallback(
@@ -344,17 +335,15 @@ export function SiteProvider({ children }) {
       return commitState((prev) => ({
         ...prev,
         joinRequests: prev.joinRequests.map((r) =>
-          String(r.id) === String(id) ? { ...r, status } : r
+          String(r.id) === String(id) ? { ...r, status } : r,
         ),
       }));
     },
-    [commitState]
+    [commitState],
   );
 
   const resetToDefault = useCallback(() => {
-    writeDeletedEventIds([]);
-    const fresh = normalizeSiteData(defaultSiteData, []);
-    return commitState(fresh);
+    return commitState(EMPTY_SITE_DATA);
   }, [commitState]);
 
   const activeUpcomingEvent =
