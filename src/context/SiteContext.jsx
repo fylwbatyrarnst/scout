@@ -95,16 +95,35 @@ export const SiteProvider = ({ children }) => {
     return () => clearInterval(interval);
   }, [refreshFromCloud]);
 
-  const commitState = useCallback(
-    (updater) => {
+const commitState = useCallback(
+    async (updater) => {
+      let nextNormalized;
       setSiteData((prev) => {
         const computed = typeof updater === "function" ? updater(prev) : updater;
-        const normalized = normalizeSiteData(computed);
-        persistToCloud(normalized);
-        return normalized;
+        nextNormalized = normalizeSiteData(computed);
+        return nextNormalized;
       });
+
+      if (!nextNormalized) return { ok: true, cloudError: "" };
+
+      if (!isCloudConfigured) {
+        return { ok: true, cloudError: "" };
+      }
+
+      setIsSyncing(true);
+      setLastSyncError("");
+      try {
+        await saveRemoteSiteData(nextNormalized);
+        return { ok: true, cloudError: "" };
+      } catch (err) {
+        const msg = err?.message || "تعذر الحفظ على السحابة";
+        setLastSyncError(msg);
+        return { ok: true, cloudError: msg };
+      } finally {
+        setIsSyncing(false);
+      }
     },
-    [persistToCloud]
+    []
   );
 
   const updateLogoUrl = (logoUrl) => {
@@ -159,14 +178,14 @@ export const SiteProvider = ({ children }) => {
     }));
   };
 
-  const addJoinRequest = (request) => {
+const addJoinRequest = async (request) => {
     const newReq = {
       ...request,
       id: Date.now(),
       status: "جديد",
       createdAt: new Date().toISOString().split("T")[0],
     };
-    commitState((prev) => ({
+    return commitState((prev) => ({
       ...prev,
       joinRequests: [newReq, ...prev.joinRequests],
     }));
