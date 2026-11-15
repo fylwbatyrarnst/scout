@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useSite } from "../context/SiteContext";
-import { pickFileFromDevice } from "../lib/imageFile";
 import { DEFAULT_ACTIVITIES } from "../components/Activities";
 import { DEFAULT_COMMITTEES } from "../components/Committees";
-
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "rover2026";
-const MAX_IMAGE_DATA_URL_CHARS = 28 * 1024;
+import {
+  signInAdmin,
+  signOutAdmin,
+  uploadImageToCloud,
+  sanitizeImageUrl,
+} from "../lib/cloudStore";
 
 const GALLERY_TEMPLATES = [
   {
@@ -66,11 +68,10 @@ const EMPTY_COMMITTEE = {
 };
 
 export default function AdminDashboard() {
-  const [isAuth, setIsAuth] = useState(
-    () => sessionStorage.getItem("rover_admin_auth") === "true"
-  );
-  const [passwordInput, setPasswordInput] = useState("");
-  const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [activeTab, setActiveTab] = useState("event");
 
   const {
@@ -95,7 +96,16 @@ export default function AdminDashboard() {
     saveDefaultSections,
     updateRequestStatus,
     resetToDefault,
+    isAdminAuthenticated,
+    joinRequests,
+    refreshJoinRequests,
   } = useSite();
+
+  useEffect(() => {
+    if (isAdminAuthenticated && isCloudEnabled) {
+      refreshJoinRequests();
+    }
+  }, [isAdminAuthenticated, isCloudEnabled, refreshJoinRequests]);
 
   const [logoInput, setLogoInput] = useState(
     siteData.logoUrl || "/rover-logo.svg"
@@ -144,34 +154,23 @@ export default function AdminDashboard() {
     e,
     onPicked,
     onErrorMsg,
-    maxWidth = 480,
-    quality = 0.42
+    _maxWidth = 800,
+    _quality = 0.82,
+    folder = "general"
   ) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file) return;
+    if (!file) return null;
+
+    if (onErrorMsg) onErrorMsg("جاري رفع الصورة إلى السحابة...");
 
     try {
-      const base64 = await pickFileFromDevice(file, maxWidth, quality);
-      if (
-        typeof base64 === "string" &&
-        base64.length > MAX_IMAGE_DATA_URL_CHARS
-      ) {
-        const approxKb = (base64.length / 1024).toFixed(1);
-        const msg = `حجم الصورة بعد الضغط (${approxKb} KB) كبير على حد 100 KB في JSONBin المجاني. الأفضل استخدام رابط صورة مباشر (URL) أو تقليل الصور المخزنة.`;
-        if (onErrorMsg) {
-          onErrorMsg(msg);
-        } else {
-          alert(msg);
-        }
-        return null;
-      }
-
+      const publicUrl = await uploadImageToCloud(file, folder);
       if (onErrorMsg) onErrorMsg("");
-      onPicked(base64);
-      return base64;
+      onPicked(publicUrl);
+      return publicUrl;
     } catch (err) {
-      const msg = err?.message || "تعذر تحميل الصورة من الجهاز.";
+      const msg = err?.message || "تعذر رفع الصورة إلى Supabase Storage.";
       if (onErrorMsg) {
         onErrorMsg(msg);
       } else {
@@ -192,20 +191,23 @@ export default function AdminDashboard() {
     });
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (passwordInput === ADMIN_PASSWORD) {
-      setIsAuth(true);
-      sessionStorage.setItem("rover_admin_auth", "true");
-      setError("");
-    } else {
-      setError("كلمة المرور غير صحيحة!");
+    setAuthError("");
+    setIsLoggingIn(true);
+    try {
+      await signInAdmin(email, password);
+      setPassword("");
+    } catch (err) {
+      setAuthError(err?.message || "بيانات الدخول غير صحيحة.");
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
-  const handleLogout = () => {
-    setIsAuth(false);
-    sessionStorage.removeItem("rover_admin_auth");
+  const handleLogout = async () => {
+    setAuthError("");
+    await signOutAdmin();
   };
 
   const startEditEvent = (ev) => {
@@ -223,7 +225,11 @@ export default function AdminDashboard() {
 
   const handleSaveEditedEvent = async (e) => {
     e.preventDefault();
-    const res = await updateUpcomingEvent(editingEventId, editEventForm);
+    const payload = {
+      ...editEventForm,
+      image: sanitizeImageUrl(editEventForm.image) || editEventForm.image.trim(),
+    };
+    const res = await updateUpcomingEvent(editingEventId, payload);
     setEditingEventId(null);
     setEventNotice(
       res?.ok === false
@@ -235,7 +241,11 @@ export default function AdminDashboard() {
 
   const handleAddNewEvent = async (e) => {
     e.preventDefault();
-    const res = await addUpcomingEvent(newEventForm);
+    const payload = {
+      ...newEventForm,
+      image: sanitizeImageUrl(newEventForm.image) || newEventForm.image.trim(),
+    };
+    const res = await addUpcomingEvent(payload);
     if (res?.ok !== false) {
       setNewEventForm(EMPTY_EVENT);
     }
@@ -259,7 +269,11 @@ export default function AdminDashboard() {
 
   const handleAddGallery = async (e) => {
     e.preventDefault();
-    const res = await addGalleryItem(newGallery);
+    const payload = {
+      ...newGallery,
+      image: sanitizeImageUrl(newGallery.image) || newGallery.image.trim(),
+    };
+    const res = await addGalleryItem(payload);
     if (res?.ok !== false) {
       setNewGallery({
         title: "",
@@ -289,7 +303,12 @@ export default function AdminDashboard() {
 
   const handleAddActivity = async (e) => {
     e.preventDefault();
-    const res = await addActivity(newActivityForm);
+    const payload = {
+      ...newActivityForm,
+      image:
+        sanitizeImageUrl(newActivityForm.image) || newActivityForm.image.trim(),
+    };
+    const res = await addActivity(payload);
     if (res?.ok !== false) {
       setNewActivityForm(EMPTY_ACTIVITY);
     }
@@ -314,7 +333,13 @@ export default function AdminDashboard() {
 
   const handleSaveEditedActivity = async (e) => {
     e.preventDefault();
-    const res = await updateActivity(editingActivityId, editActivityForm);
+    const payload = {
+      ...editActivityForm,
+      image:
+        sanitizeImageUrl(editActivityForm.image) ||
+        editActivityForm.image.trim(),
+    };
+    const res = await updateActivity(editingActivityId, payload);
     setEditingActivityId(null);
     setActivityNotice(
       res?.ok === false
@@ -336,7 +361,13 @@ export default function AdminDashboard() {
 
   const handleAddCommittee = async (e) => {
     e.preventDefault();
-    const res = await addCommittee(newCommitteeForm);
+    const payload = {
+      ...newCommitteeForm,
+      image:
+        sanitizeImageUrl(newCommitteeForm.image) ||
+        newCommitteeForm.image.trim(),
+    };
+    const res = await addCommittee(payload);
     if (res?.ok !== false) {
       setNewCommitteeForm(EMPTY_COMMITTEE);
     }
@@ -362,7 +393,13 @@ export default function AdminDashboard() {
 
   const handleSaveEditedCommittee = async (e) => {
     e.preventDefault();
-    const res = await updateCommittee(editingCommitteeId, editCommitteeForm);
+    const payload = {
+      ...editCommitteeForm,
+      image:
+        sanitizeImageUrl(editCommitteeForm.image) ||
+        editCommitteeForm.image.trim(),
+    };
+    const res = await updateCommittee(editingCommitteeId, payload);
     setEditingCommitteeId(null);
     setCommitteeNotice(
       res?.ok === false
@@ -407,7 +444,8 @@ export default function AdminDashboard() {
     e.preventDefault();
     setLogoError("");
     setLogoSaved(false);
-    const res = await updateLogoUrl(logoInput);
+    const cleanLogo = sanitizeImageUrl(logoInput) || logoInput.trim();
+    const res = await updateLogoUrl(cleanLogo);
     if (res?.ok === false) {
       setLogoError(res.cloudError || "تعذر حفظ الشعار على السحابة");
       return;
@@ -421,7 +459,8 @@ export default function AdminDashboard() {
     setHeroBgError("");
     setHeroBgSaved(false);
     try {
-      const res = await updateHeroBackgroundUrl(heroBgInput);
+      const cleanHero = sanitizeImageUrl(heroBgInput) || heroBgInput.trim();
+      const res = await updateHeroBackgroundUrl(cleanHero);
       if (res?.ok === false) {
         setHeroBgError(res.cloudError || "تعذر حفظ خلفية الهيرو على السحابة");
         return;
@@ -443,30 +482,46 @@ export default function AdminDashboard() {
     }
   };
 
-  if (!isAuth) {
+  if (!isAdminAuthenticated) {
     return (
       <div className="min-vh-100 d-flex align-items-center justify-content-center bg-black">
         <div className="card rover-card p-4 shadow-lg" style={{ width: "380px" }}>
           <div className="text-center mb-3">
             <h4 className="fw-bold text-warning mt-2">لوحة تحكم العشيرة</h4>
-            <p className="text-secondary small">أدخل كلمة المرور للمتابعة</p>
+            <p className="text-secondary small">
+              سجّل الدخول بحساب الأدمن للمتابعة
+            </p>
           </div>
           <form onSubmit={handleLogin}>
             <input
-              type="password"
+              type="email"
+              autoComplete="email"
               className="form-control bg-dark text-white border-secondary mb-3 text-center"
-              placeholder="كلمة المرور"
-              value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
+              placeholder="البريد الإلكتروني للأدمن"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               required
             />
-            {error && (
+            <input
+              type="password"
+              autoComplete="current-password"
+              className="form-control bg-dark text-white border-secondary mb-3 text-center"
+              placeholder="كلمة المرور"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            {authError && (
               <div className="alert alert-danger py-2 small text-center">
-                {error}
+                {authError}
               </div>
             )}
-            <button type="submit" className="btn btn-gold w-100 mb-2">
-              دخول
+            <button
+              type="submit"
+              disabled={isLoggingIn}
+              className="btn btn-gold w-100 mb-2"
+            >
+              {isLoggingIn ? "جاري التحقق..." : "دخول"}
             </button>
             <Link to="/" className="btn btn-outline-gold btn-sm w-100">
               العودة للموقع الرئيسي
@@ -476,6 +531,18 @@ export default function AdminDashboard() {
       </div>
     );
   }
+
+  const upcomingEventsList = Array.isArray(siteData.upcomingEvents)
+    ? siteData.upcomingEvents
+    : [];
+
+  const galleryList = Array.isArray(siteData.gallery) ? siteData.gallery : [];
+
+  const requestsList = Array.isArray(joinRequests)
+    ? joinRequests
+    : Array.isArray(siteData.joinRequests)
+    ? siteData.joinRequests
+    : [];
 
   const displayedActivities =
     Array.isArray(siteData.activities) && siteData.activities.length > 0
@@ -497,7 +564,7 @@ export default function AdminDashboard() {
           {isCloudEnabled ? (
             <span className="badge bg-success px-3 py-2">
               <i className="bi bi-cloud-check-fill me-1"></i>
-              {isSyncing ? "جاري المزامنة..." : "متصل بـ JSONBin السحابي"}
+              {isSyncing ? "جاري المزامنة..." : "متصل بـ Supabase السحابي"}
             </span>
           ) : (
             <span className="badge bg-warning text-dark px-3 py-2">
@@ -511,7 +578,10 @@ export default function AdminDashboard() {
           {isCloudEnabled && (
             <button
               type="button"
-              onClick={() => refreshFromCloud()}
+              onClick={() => {
+                if (refreshFromCloud) refreshFromCloud();
+                if (refreshJoinRequests) refreshJoinRequests();
+              }}
               className="btn btn-outline-gold btn-sm"
               title="مزامنة الآن"
             >
@@ -544,7 +614,7 @@ export default function AdminDashboard() {
               }`}
               onClick={() => setActiveTab("event")}
             >
-              الأحداث القادمة ({siteData.upcomingEvents.length})
+              الأحداث القادمة ({upcomingEventsList.length})
             </button>
           </li>
           <li className="nav-item">
@@ -580,7 +650,7 @@ export default function AdminDashboard() {
               }`}
               onClick={() => setActiveTab("gallery")}
             >
-              إدارة المعرض ({siteData.gallery.length})
+              إدارة المعرض ({galleryList.length})
             </button>
           </li>
           <li className="nav-item">
@@ -592,7 +662,7 @@ export default function AdminDashboard() {
               }`}
               onClick={() => setActiveTab("requests")}
             >
-              طلبات الانضمام ({siteData.joinRequests.length})
+              طلبات الانضمام ({requestsList.length})
             </button>
           </li>
           <li className="nav-item">
@@ -691,7 +761,7 @@ export default function AdminDashboard() {
 
                     <div className="mb-2">
                       <label className="form-label small text-warning">
-                        رابط صورة مباشر (URL) أو اختر ملفاً صغيراً
+                        رابط صورة مباشر (URL) أو اختر ملفاً للرفع
                       </label>
                       <input
                         type="text"
@@ -714,7 +784,10 @@ export default function AdminDashboard() {
                             e,
                             (img) =>
                               setEditEventForm({ ...editEventForm, image: img }),
-                            (msg) => setEventNotice(msg)
+                            (msg) => setEventNotice(msg),
+                            800,
+                            0.82,
+                            "events"
                           )
                         }
                       />
@@ -838,7 +911,7 @@ export default function AdminDashboard() {
 
                     <div className="mb-2">
                       <label className="form-label small text-warning">
-                        رابط صورة مباشر (URL) أو اختر ملفاً صغيراً
+                        رابط صورة مباشر (URL) أو اختر ملفاً للرفع
                       </label>
                       <input
                         type="text"
@@ -862,7 +935,10 @@ export default function AdminDashboard() {
                             e,
                             (img) =>
                               setNewEventForm({ ...newEventForm, image: img }),
-                            (msg) => setEventNotice(msg)
+                            (msg) => setEventNotice(msg),
+                            800,
+                            0.82,
+                            "events"
                           )
                         }
                       />
@@ -915,10 +991,10 @@ export default function AdminDashboard() {
             <div className="col-lg-7">
               <div className="card rover-card p-4">
                 <h5 className="fw-bold text-warning mb-3">
-                  الأحداث القادمة المسجلة ({siteData.upcomingEvents.length})
+                  الأحداث القادمة المسجلة ({upcomingEventsList.length})
                 </h5>
                 <div className="d-flex flex-column gap-3">
-                  {siteData.upcomingEvents.map((ev) => (
+                  {upcomingEventsList.map((ev) => (
                     <div
                       key={ev.id}
                       className="p-3 rounded-3 bg-dark border border-secondary d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-3"
@@ -992,7 +1068,8 @@ export default function AdminDashboard() {
                       ? "تعديل مجال نشاط"
                       : "إضافة مجال نشاط جديد"}
                   </h5>
-                  {siteData.activities.length === 0 && (
+                  {(!Array.isArray(siteData.activities) ||
+                    siteData.activities.length === 0) && (
                     <button
                       type="button"
                       className="btn btn-outline-gold btn-sm"
@@ -1042,7 +1119,7 @@ export default function AdminDashboard() {
 
                     <div className="mb-2">
                       <label className="form-label small text-warning">
-                        رابط صورة مباشر (URL) أو ملف صغير
+                        رابط صورة مباشر (URL) أو اختر ملفاً للرفع
                       </label>
                       <input
                         type="text"
@@ -1068,7 +1145,10 @@ export default function AdminDashboard() {
                                 ...editActivityForm,
                                 image: img,
                               }),
-                            (msg) => setActivityNotice(msg)
+                            (msg) => setActivityNotice(msg),
+                            800,
+                            0.82,
+                            "activities"
                           )
                         }
                       />
@@ -1157,7 +1237,7 @@ export default function AdminDashboard() {
 
                     <div className="mb-2">
                       <label className="form-label small text-warning">
-                        رابط صورة مباشر (URL) أو ملف صغير
+                        رابط صورة مباشر (URL) أو اختر ملفاً للرفع
                       </label>
                       <input
                         type="text"
@@ -1183,7 +1263,10 @@ export default function AdminDashboard() {
                                 ...newActivityForm,
                                 image: img,
                               }),
-                            (msg) => setActivityNotice(msg)
+                            (msg) => setActivityNotice(msg),
+                            800,
+                            0.82,
+                            "activities"
                           )
                         }
                       />
@@ -1272,24 +1355,25 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
-                      {siteData.activities.length > 0 && (
-                        <div className="d-flex gap-2 flex-shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => startEditActivity(act)}
-                            className="btn btn-outline-gold btn-sm"
-                          >
-                            تعديل
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteActivity(act.id)}
-                            className="btn btn-outline-danger btn-sm"
-                          >
-                            حذف
-                          </button>
-                        </div>
-                      )}
+                      {Array.isArray(siteData.activities) &&
+                        siteData.activities.length > 0 && (
+                          <div className="d-flex gap-2 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => startEditActivity(act)}
+                              className="btn btn-outline-gold btn-sm"
+                            >
+                              تعديل
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteActivity(act.id)}
+                              className="btn btn-outline-danger btn-sm"
+                            >
+                              حذف
+                            </button>
+                          </div>
+                        )}
                     </div>
                   ))}
                 </div>
@@ -1306,7 +1390,8 @@ export default function AdminDashboard() {
                   <h5 className="fw-bold text-warning mb-0">
                     {editingCommitteeId ? "تعديل لجنة" : "إضافة لجنة نوعية"}
                   </h5>
-                  {siteData.committees.length === 0 && (
+                  {(!Array.isArray(siteData.committees) ||
+                    siteData.committees.length === 0) && (
                     <button
                       type="button"
                       className="btn btn-outline-gold btn-sm"
@@ -1357,7 +1442,7 @@ export default function AdminDashboard() {
 
                     <div className="mb-2">
                       <label className="form-label small text-warning">
-                        رابط صورة مباشر (URL) أو ملف صغير
+                        رابط صورة مباشر (URL) أو اختر ملفاً للرفع
                       </label>
                       <input
                         type="text"
@@ -1383,7 +1468,10 @@ export default function AdminDashboard() {
                                 ...editCommitteeForm,
                                 image: img,
                               }),
-                            (msg) => setCommitteeNotice(msg)
+                            (msg) => setCommitteeNotice(msg),
+                            800,
+                            0.82,
+                            "committees"
                           )
                         }
                       />
@@ -1489,7 +1577,7 @@ export default function AdminDashboard() {
 
                     <div className="mb-2">
                       <label className="form-label small text-warning">
-                        رابط صورة مباشر (URL) أو ملف صغير
+                        رابط صورة مباشر (URL) أو اختر ملفاً للرفع
                       </label>
                       <input
                         type="text"
@@ -1515,7 +1603,10 @@ export default function AdminDashboard() {
                                 ...newCommitteeForm,
                                 image: img,
                               }),
-                            (msg) => setCommitteeNotice(msg)
+                            (msg) => setCommitteeNotice(msg),
+                            800,
+                            0.82,
+                            "committees"
                           )
                         }
                       />
@@ -1614,24 +1705,25 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
-                      {siteData.committees.length > 0 && (
-                        <div className="d-flex gap-2 flex-shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => startEditCommittee(com)}
-                            className="btn btn-outline-gold btn-sm"
-                          >
-                            تعديل
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteCommittee(com.id)}
-                            className="btn btn-outline-danger btn-sm"
-                          >
-                            حذف
-                          </button>
-                        </div>
-                      )}
+                      {Array.isArray(siteData.committees) &&
+                        siteData.committees.length > 0 && (
+                          <div className="d-flex gap-2 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => startEditCommittee(com)}
+                              className="btn btn-outline-gold btn-sm"
+                            >
+                              تعديل
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCommittee(com.id)}
+                              className="btn btn-outline-danger btn-sm"
+                            >
+                              حذف
+                            </button>
+                          </div>
+                        )}
                     </div>
                   ))}
                 </div>
@@ -1648,7 +1740,7 @@ export default function AdminDashboard() {
                   إضافة فعالية جديدة للمعرض
                 </h5>
                 <p className="text-secondary small mb-3">
-                  اختر قالباً جاهزاً أو اكتب البيانات وأضف رابط صورة أو ملفاً صغيراً:
+                  اختر قالباً جاهزاً أو اكتب البيانات وأضف رابط صورة أو ملفاً للرفع:
                 </p>
 
                 <div className="d-flex flex-wrap gap-2 mb-3">
@@ -1683,7 +1775,7 @@ export default function AdminDashboard() {
 
                   <div className="mb-2">
                     <label className="form-label small text-warning mb-1">
-                      رابط صورة مباشر (URL) أو اختر ملفاً صغيراً
+                      رابط صورة مباشر (URL) أو اختر ملفاً للرفع
                     </label>
                     <input
                       type="text"
@@ -1704,7 +1796,10 @@ export default function AdminDashboard() {
                           e,
                           (img) =>
                             setNewGallery({ ...newGallery, image: img }),
-                          (msg) => setGalleryNotice(msg)
+                          (msg) => setGalleryNotice(msg),
+                          800,
+                          0.82,
+                          "gallery"
                         )
                       }
                     />
@@ -1775,7 +1870,7 @@ export default function AdminDashboard() {
               <div className="card rover-card p-4">
                 <h5 className="fw-bold text-warning mb-3">الفعاليات الحالية</h5>
                 <div className="list-group">
-                  {siteData.gallery.map((g) => (
+                  {galleryList.map((g) => (
                     <div
                       key={g.id}
                       className="list-group-item bg-dark text-light border-secondary d-flex justify-content-between align-items-center"
@@ -1816,7 +1911,20 @@ export default function AdminDashboard() {
 
         {activeTab === "requests" && (
           <div className="card rover-card p-4">
-            <h5 className="fw-bold text-warning mb-3">طلبات الانضمام الواردة</h5>
+            <div className="d-flex justify-content-between align-items-center mb-3">
+              <h5 className="fw-bold text-warning mb-0">
+                طلبات الانضمام الواردة
+              </h5>
+              {isCloudEnabled && (
+                <button
+                  type="button"
+                  onClick={() => refreshJoinRequests()}
+                  className="btn btn-outline-gold btn-sm"
+                >
+                  تحديث القائمة
+                </button>
+              )}
+            </div>
             {requestNotice && (
               <div className="alert alert-warning py-2 small">
                 {requestNotice}
@@ -1835,7 +1943,7 @@ export default function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {siteData.joinRequests.map((req) => (
+                  {requestsList.map((req) => (
                     <tr key={req.id}>
                       <td className="fw-bold text-warning">{req.name}</td>
                       <td>{req.year}</td>
@@ -1904,7 +2012,8 @@ export default function AdminDashboard() {
                           (img) => setLogoInput(img),
                           (msg) => setLogoError(msg),
                           320,
-                          0.45
+                          0.45,
+                          "branding"
                         )
                       }
                     />
@@ -1942,7 +2051,7 @@ export default function AdminDashboard() {
                 <form onSubmit={handleSaveHeroBg}>
                   <div className="mb-3">
                     <label className="form-label small text-warning">
-                      رابط صورة الخلفية (URL) أو ملف صغير جداً
+                      رابط صورة الخلفية (URL) أو اختر ملفاً للرفع
                     </label>
                     <input
                       type="text"
@@ -1961,7 +2070,8 @@ export default function AdminDashboard() {
                           (img) => setHeroBgInput(img),
                           (msg) => setHeroBgError(msg),
                           480,
-                          0.4
+                          0.4,
+                          "branding"
                         )
                       }
                     />
@@ -2006,7 +2116,7 @@ export default function AdminDashboard() {
               <div className="card rover-card p-4 border-danger border-opacity-50">
                 <h6 className="fw-bold text-danger mb-2">إعادة ضبط البيانات</h6>
                 <p className="text-secondary small mb-3">
-                  لو حجم البيانات على JSONBin ممتلئ بصور قديمة، يمكنك إعادة ضبط البيانات وتفريغ السحابة ثم البدء بروابط صور خفيفة.
+                  يمكنك إعادة ضبط بيانات الموقع السحابية إلى الحالة الافتراضية الفارغة عند الحاجة.
                 </p>
                 <button
                   type="button"

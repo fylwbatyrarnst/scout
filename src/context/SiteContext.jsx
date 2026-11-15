@@ -1,610 +1,519 @@
 import React, {
   createContext,
   useContext,
-  useState,
   useEffect,
+  useState,
   useCallback,
-  useRef,
 } from "react";
 import {
   isCloudConfigured,
   fetchRemoteSiteData,
   saveRemoteSiteData,
+  getCurrentSession,
+  onAuthStateChange,
+  submitJoinRequestRemote,
+  fetchJoinRequestsRemote,
+  updateJoinRequestStatusRemote,
+  sanitizeImageUrl,
 } from "../lib/cloudStore";
 
-const SiteContext = createContext();
+const SiteContext = createContext(null);
+const LOCAL_STORAGE_KEY = "asu_rover_site_data_v1";
 
-const LOCAL_CACHE_KEY = "rover_site_data_cache_v2";
-const POLL_INTERVAL_MS = 15000;
-
-const EMPTY_SITE_DATA = {
-  logoUrl: "",
+const DEFAULT_SITE_DATA = {
+  logoUrl: "/rover-logo.svg",
   heroBackgroundUrl: "",
+  heroTitle: "",
+  heroSubtitle: "",
+  heroImage: "",
   upcomingEvents: [],
+  events: [],
   gallery: [],
   activities: [],
   committees: [],
   joinRequests: [],
 };
 
-function normalizeSiteData(raw) {
-  const src = raw && typeof raw === "object" ? raw : {};
+function createItemId(prefix = "item") {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
 
-  const upcomingEvents = Array.isArray(src.upcomingEvents)
-    ? src.upcomingEvents.map((ev, idx) => {
-        const desc =
-          typeof ev?.description === "string"
-            ? ev.description
-            : typeof ev?.shortDesc === "string"
-            ? ev.shortDesc
-            : "";
-        return {
-          id: ev?.id ?? `${Date.now()}-${idx}`,
-          active: ev?.active !== false,
-          title: typeof ev?.title === "string" ? ev.title : "",
-          date: typeof ev?.date === "string" ? ev.date : "",
-          location: typeof ev?.location === "string" ? ev.location : "",
-          description: desc,
-          shortDesc: desc,
-          image: typeof ev?.image === "string" ? ev.image : "",
-        };
-      })
+function parseListField(value, delimiterRegex) {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v).trim()).filter(Boolean);
+  }
+  if (typeof value !== "string") return [];
+  return value
+    .split(delimiterRegex)
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+function sanitizeSitePayload(raw) {
+  if (!raw || typeof raw !== "object") return DEFAULT_SITE_DATA;
+  const { joinRequests: _ignoredRequests, ...rest } = raw;
+
+  const normalizedEvents = Array.isArray(rest.upcomingEvents)
+    ? rest.upcomingEvents
+    : Array.isArray(rest.events)
+    ? rest.events
     : [];
-
-  const gallery = Array.isArray(src.gallery)
-    ? src.gallery.map((item, idx) => {
-        const detailsText =
-          typeof item?.details === "string"
-            ? item.details
-            : typeof item?.shortDesc === "string"
-            ? item.shortDesc
-            : "";
-        return {
-          id: item?.id ?? `${Date.now()}-g-${idx}`,
-          title: typeof item?.title === "string" ? item.title : "",
-          icon: typeof item?.icon === "string" ? item.icon : "",
-          shortDesc: typeof item?.shortDesc === "string" ? item.shortDesc : "",
-          details: detailsText,
-          image: typeof item?.image === "string" ? item.image : "",
-        };
-      })
-    : [];
-
-  const activities = Array.isArray(src.activities)
-    ? src.activities.map((act, idx) => ({
-        id: act?.id ?? `${Date.now()}-a-${idx}`,
-        badge: typeof act?.badge === "string" ? act.badge : "مجال كشفي",
-        title: typeof act?.title === "string" ? act.title : "",
-        description:
-          typeof act?.description === "string" ? act.description : "",
-        image: typeof act?.image === "string" ? act.image : "",
-      }))
-    : [];
-
-  const committees = Array.isArray(src.committees)
-    ? src.committees.map((com, idx) => ({
-        id: com?.id ?? `${Date.now()}-c-${idx}`,
-        title: typeof com?.title === "string" ? com.title : "",
-        summary: typeof com?.summary === "string" ? com.summary : "",
-        image: typeof com?.image === "string" ? com.image : "",
-        tasks: Array.isArray(com?.tasks) ? com.tasks : [],
-        skills: Array.isArray(com?.skills) ? com.skills : [],
-      }))
-    : [];
-
-  const joinRequests = Array.isArray(src.joinRequests) ? src.joinRequests : [];
 
   return {
-    logoUrl: typeof src.logoUrl === "string" ? src.logoUrl : "",
+    ...DEFAULT_SITE_DATA,
+    ...rest,
+    logoUrl:
+      sanitizeImageUrl(rest.logoUrl || "") ||
+      rest.logoUrl ||
+      DEFAULT_SITE_DATA.logoUrl,
     heroBackgroundUrl:
-      typeof src.heroBackgroundUrl === "string" ? src.heroBackgroundUrl : "",
-    upcomingEvents,
-    gallery,
-    activities,
-    committees,
-    joinRequests,
+      sanitizeImageUrl(rest.heroBackgroundUrl || "") ||
+      rest.heroBackgroundUrl ||
+      "",
+    heroImage: sanitizeImageUrl(rest.heroImage || "") || rest.heroImage || "",
+    upcomingEvents: normalizedEvents,
+    events: Array.isArray(rest.events) ? rest.events : normalizedEvents,
+    gallery: Array.isArray(rest.gallery) ? rest.gallery : [],
+    activities: Array.isArray(rest.activities) ? rest.activities : [],
+    committees: Array.isArray(rest.committees) ? rest.committees : [],
   };
-}
-
-function readLocalCache() {
-  try {
-    const raw = localStorage.getItem(LOCAL_CACHE_KEY);
-    if (!raw) return null;
-    return normalizeSiteData(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-
-function writeLocalCache(data) {
-  try {
-    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(data));
-    return true;
-  } catch {
-    try {
-      const lighter = {
-        ...data,
-        heroBackgroundUrl: data.heroBackgroundUrl?.startsWith("data:")
-          ? ""
-          : data.heroBackgroundUrl,
-        upcomingEvents: (data.upcomingEvents || []).map((ev) => ({
-          ...ev,
-          image: ev.image?.startsWith("data:") ? "" : ev.image,
-        })),
-        gallery: (data.gallery || []).map((g) => ({
-          ...g,
-          image: g.image?.startsWith("data:") ? "" : g.image,
-        })),
-        activities: (data.activities || []).map((a) => ({
-          ...a,
-          image: a.image?.startsWith("data:") ? "" : a.image,
-        })),
-        committees: (data.committees || []).map((c) => ({
-          ...c,
-          image: c.image?.startsWith("data:") ? "" : c.image,
-        })),
-      };
-      localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(lighter));
-      return true;
-    } catch {
-      return false;
-    }
-  }
 }
 
 export function SiteProvider({ children }) {
   const [siteData, setSiteData] = useState(() => {
-    return readLocalCache() || EMPTY_SITE_DATA;
+    try {
+      const cached = localStorage.getItem(LOCAL_STORAGE_KEY);
+      return cached ? sanitizeSitePayload(JSON.parse(cached)) : DEFAULT_SITE_DATA;
+    } catch {
+      return DEFAULT_SITE_DATA;
+    }
   });
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSyncError, setLastSyncError] = useState("");
 
-  const isSavingRef = useRef(false);
-  const siteDataRef = useRef(siteData);
-  siteDataRef.current = siteData;
+  const [joinRequests, setJoinRequests] = useState([]);
+  const [session, setSession] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [syncError, setSyncError] = useState("");
 
-  const refreshFromCloud = useCallback(async ({ silent = false } = {}) => {
-    if (!isCloudConfigured) return;
-    if (isSavingRef.current) return;
+  const isAdminAuthenticated = Boolean(session?.user);
 
-    if (!silent) setIsSyncing(true);
+  const loadJoinRequests = useCallback(async (activeSession) => {
+    if (!activeSession?.user || !isCloudConfigured) {
+      setJoinRequests([]);
+      return;
+    }
+    try {
+      const rows = await fetchJoinRequestsRemote();
+      setJoinRequests(rows);
+    } catch (err) {
+      setSyncError(err?.message || "تعذر تحميل طلبات الانضمام.");
+    }
+  }, []);
+
+  const refreshFromCloud = useCallback(async () => {
+    if (!isCloudConfigured) return null;
+    setIsSaving(true);
+    setSyncError("");
     try {
       const remote = await fetchRemoteSiteData();
-      if (isSavingRef.current) return;
-
-      if (remote && remote.data && typeof remote.data === "object") {
-        const normalized = normalizeSiteData(remote.data);
-        siteDataRef.current = normalized;
-        setSiteData(normalized);
-        writeLocalCache(normalized);
-        setLastSyncError("");
-      } else if (remote && remote.isEmpty) {
-        const seed = normalizeSiteData(siteDataRef.current || EMPTY_SITE_DATA);
-        await saveRemoteSiteData(seed);
-        setLastSyncError("");
+      if (remote?.data) {
+        const cleaned = sanitizeSitePayload(remote.data);
+        setSiteData(cleaned);
+        try {
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cleaned));
+        } catch {
+          // تجاهل خطأ التخزين المحلي
+        }
+        return cleaned;
       }
+      return null;
     } catch (err) {
-      if (!isSavingRef.current) {
-        setLastSyncError(
-          err?.message || "تعذر الاتصال بقاعدة البيانات السحابية"
-        );
-      }
+      const msg = err?.message || "تعذر مزامنة بيانات الموقع.";
+      setSyncError(msg);
+      return null;
     } finally {
-      if (!silent) setIsSyncing(false);
+      setIsSaving(false);
     }
   }, []);
 
   useEffect(() => {
-    refreshFromCloud();
-    if (!isCloudConfigured) return;
+    let active = true;
 
-    const timer = setInterval(() => {
-      refreshFromCloud({ silent: true });
-    }, POLL_INTERVAL_MS);
+    async function init() {
+      setIsLoading(true);
+      setSyncError("");
 
-    const handleFocus = () => {
-      if (!isSavingRef.current) {
-        refreshFromCloud({ silent: true });
+      const currentSession = await getCurrentSession();
+      if (active) setSession(currentSession);
+
+      if (isCloudConfigured) {
+        try {
+          const remote = await fetchRemoteSiteData();
+          if (active && remote?.data) {
+            const cleaned = sanitizeSitePayload(remote.data);
+            setSiteData(cleaned);
+            try {
+              localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cleaned));
+            } catch {
+              // تجاهل خطأ التخزين المحلي
+            }
+          }
+        } catch (err) {
+          if (active) setSyncError(err?.message || "تعذر مزامنة بيانات الموقع.");
+        }
       }
-    };
-    window.addEventListener("focus", handleFocus);
+
+      if (active && currentSession?.user) {
+        await loadJoinRequests(currentSession);
+      }
+
+      if (active) setIsLoading(false);
+    }
+
+    init();
+
+    const { data: authListener } = onAuthStateChange(async (nextSession) => {
+      if (!active) return;
+      setSession(nextSession);
+      await loadJoinRequests(nextSession);
+    });
 
     return () => {
-      clearInterval(timer);
-      window.removeEventListener("focus", handleFocus);
+      active = false;
+      authListener?.subscription?.unsubscribe();
     };
-  }, [refreshFromCloud]);
+  }, [loadJoinRequests]);
 
-  const commitState = useCallback(async (updater) => {
-    isSavingRef.current = true;
+  const updateSiteData = useCallback(async (updaterOrValue) => {
+    setSyncError("");
+    let nextData;
 
-    const prevNormalized = normalizeSiteData(siteDataRef.current);
-    const computed =
-      typeof updater === "function" ? updater(prevNormalized) : updater;
-    const nextNormalized = normalizeSiteData(computed);
+    setSiteData((prev) => {
+      const rawNext =
+        typeof updaterOrValue === "function" ? updaterOrValue(prev) : updaterOrValue;
+      nextData = sanitizeSitePayload(rawNext);
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextData));
+      } catch {
+        // تجاهل خطأ امتلاء التخزين المحلي
+      }
+      return nextData;
+    });
 
-    siteDataRef.current = nextNormalized;
-    setSiteData(nextNormalized);
-    writeLocalCache(nextNormalized);
-
-    if (!isCloudConfigured) {
-      setTimeout(() => {
-        isSavingRef.current = false;
-      }, 500);
-      return { ok: true, cloudError: "" };
+    if (isCloudConfigured && nextData) {
+      setIsSaving(true);
+      try {
+        await saveRemoteSiteData(nextData);
+        return { ok: true };
+      } catch (err) {
+        const msg = err?.message || "تعذر حفظ البيانات سحابياً.";
+        setSyncError(msg);
+        return { ok: false, cloudError: msg };
+      } finally {
+        setIsSaving(false);
+      }
     }
 
-    setIsSyncing(true);
-    setLastSyncError("");
-
-    try {
-      await saveRemoteSiteData(nextNormalized);
-      return { ok: true, cloudError: "" };
-    } catch (err) {
-      const msg = err?.message || "تعذر حفظ التعديل على السحابة";
-      setLastSyncError(msg);
-      return { ok: false, cloudError: msg };
-    } finally {
-      setIsSyncing(false);
-      setTimeout(() => {
-        isSavingRef.current = false;
-      }, 2500);
-    }
+    return { ok: true };
   }, []);
 
   const updateLogoUrl = useCallback(
-    (logoUrl) => {
-      return commitState((prev) => ({
+    async (logoUrl) => {
+      const cleanUrl = sanitizeImageUrl(logoUrl) || String(logoUrl || "").trim();
+      return updateSiteData((prev) => ({
         ...prev,
-        logoUrl: typeof logoUrl === "string" ? logoUrl.trim() : "",
+        logoUrl: cleanUrl || DEFAULT_SITE_DATA.logoUrl,
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const updateHeroBackgroundUrl = useCallback(
-    (heroBackgroundUrl) => {
-      return commitState((prev) => ({
+    async (heroBackgroundUrl) => {
+      const cleanUrl =
+        sanitizeImageUrl(heroBackgroundUrl) ||
+        String(heroBackgroundUrl || "").trim();
+      return updateSiteData((prev) => ({
         ...prev,
-        heroBackgroundUrl:
-          typeof heroBackgroundUrl === "string" ? heroBackgroundUrl.trim() : "",
+        heroBackgroundUrl: cleanUrl,
+        heroImage: cleanUrl,
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const addUpcomingEvent = useCallback(
-    (newEvent) => {
-      const desc =
-        typeof newEvent?.description === "string"
-          ? newEvent.description
-          : typeof newEvent?.shortDesc === "string"
-          ? newEvent.shortDesc
-          : "";
-
-      const created = {
-        id: Date.now(),
-        active: newEvent?.active !== false,
-        title: typeof newEvent?.title === "string" ? newEvent.title : "",
-        date: typeof newEvent?.date === "string" ? newEvent.date : "",
-        location: typeof newEvent?.location === "string" ? newEvent.location : "",
-        description: desc,
-        shortDesc: desc,
-        image: typeof newEvent?.image === "string" ? newEvent.image.trim() : "",
+    async (eventForm) => {
+      const newEvent = {
+        id: createItemId("evt"),
+        active: eventForm?.active !== false,
+        title: String(eventForm?.title || "").trim(),
+        date: eventForm?.date || "",
+        location: String(eventForm?.location || "").trim(),
+        description: String(eventForm?.description || "").trim(),
+        shortDesc: String(eventForm?.description || "").trim(),
+        image:
+          sanitizeImageUrl(eventForm?.image || "") ||
+          String(eventForm?.image || "").trim(),
       };
-
-      return commitState((prev) => ({
-        ...prev,
-        upcomingEvents: [created, ...prev.upcomingEvents],
-      }));
+      return updateSiteData((prev) => {
+        const list = Array.isArray(prev.upcomingEvents) ? prev.upcomingEvents : [];
+        const updated = [newEvent, ...list];
+        return { ...prev, upcomingEvents: updated, events: updated };
+      });
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const updateUpcomingEvent = useCallback(
-    (id, updatedFields) => {
-      return commitState((prev) => ({
-        ...prev,
-        upcomingEvents: prev.upcomingEvents.map((ev) => {
-          if (String(ev.id) !== String(id)) return ev;
-          const nextDesc =
-            updatedFields?.description !== undefined
-              ? String(updatedFields.description)
-              : updatedFields?.shortDesc !== undefined
-              ? String(updatedFields.shortDesc)
-              : ev.description || ev.shortDesc || "";
-
-          return {
-            ...ev,
-            ...updatedFields,
-            active:
-              updatedFields?.active !== undefined
-                ? Boolean(updatedFields.active)
-                : ev.active,
-            title:
-              updatedFields?.title !== undefined
-                ? String(updatedFields.title)
-                : ev.title,
-            date:
-              updatedFields?.date !== undefined
-                ? String(updatedFields.date)
-                : ev.date,
-            location:
-              updatedFields?.location !== undefined
-                ? String(updatedFields.location)
-                : ev.location,
-            description: nextDesc,
-            shortDesc: nextDesc,
-            image:
-              updatedFields?.image !== undefined
-                ? String(updatedFields.image).trim()
-                : ev.image,
-          };
-        }),
-      }));
+    async (id, eventForm) => {
+      return updateSiteData((prev) => {
+        const list = Array.isArray(prev.upcomingEvents) ? prev.upcomingEvents : [];
+        const updated = list.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                active: eventForm?.active !== false,
+                title: String(eventForm?.title || "").trim(),
+                date: eventForm?.date || "",
+                location: String(eventForm?.location || "").trim(),
+                description: String(eventForm?.description || "").trim(),
+                shortDesc: String(eventForm?.description || "").trim(),
+                image:
+                  sanitizeImageUrl(eventForm?.image || "") ||
+                  String(eventForm?.image || "").trim(),
+              }
+            : item
+        );
+        return { ...prev, upcomingEvents: updated, events: updated };
+      });
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const deleteUpcomingEvent = useCallback(
-    (id) => {
-      return commitState((prev) => ({
-        ...prev,
-        upcomingEvents: prev.upcomingEvents.filter(
-          (ev) => String(ev.id) !== String(id)
-        ),
-      }));
+    async (id) => {
+      return updateSiteData((prev) => {
+        const list = Array.isArray(prev.upcomingEvents) ? prev.upcomingEvents : [];
+        const updated = list.filter((item) => item.id !== id);
+        return { ...prev, upcomingEvents: updated, events: updated };
+      });
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const addGalleryItem = useCallback(
-    (item) => {
-      const detailsText =
-        typeof item?.details === "string"
-          ? item.details
-          : typeof item?.shortDesc === "string"
-          ? item.shortDesc
-          : "";
-
-      const created = {
-        id: Date.now(),
-        title: typeof item?.title === "string" ? item.title : "",
-        icon: typeof item?.icon === "string" ? item.icon : "",
-        shortDesc: typeof item?.shortDesc === "string" ? item.shortDesc : "",
-        details: detailsText,
-        image: typeof item?.image === "string" ? item.image.trim() : "",
+    async (galleryForm) => {
+      const newItem = {
+        id: createItemId("gal"),
+        title: String(galleryForm?.title || "").trim(),
+        icon: String(galleryForm?.icon || "").trim(),
+        shortDesc: String(galleryForm?.shortDesc || "").trim(),
+        details: String(galleryForm?.details || "").trim(),
+        image:
+          sanitizeImageUrl(galleryForm?.image || "") ||
+          String(galleryForm?.image || "").trim(),
       };
-
-      return commitState((prev) => ({
+      return updateSiteData((prev) => ({
         ...prev,
-        gallery: [created, ...prev.gallery],
+        gallery: [newItem, ...(Array.isArray(prev.gallery) ? prev.gallery : [])],
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const deleteGalleryItem = useCallback(
-    (id) => {
-      return commitState((prev) => ({
+    async (id) => {
+      return updateSiteData((prev) => ({
         ...prev,
-        gallery: prev.gallery.filter((item) => String(item.id) !== String(id)),
+        gallery: (Array.isArray(prev.gallery) ? prev.gallery : []).filter(
+          (item) => item.id !== id
+        ),
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const addActivity = useCallback(
-    (act) => {
-      const created = {
-        id: Date.now(),
-        badge: typeof act?.badge === "string" ? act.badge.trim() : "مجال كشفي",
-        title: typeof act?.title === "string" ? act.title.trim() : "",
-        description:
-          typeof act?.description === "string" ? act.description.trim() : "",
-        image: typeof act?.image === "string" ? act.image.trim() : "",
+    async (activityForm) => {
+      const newActivity = {
+        id: createItemId("act"),
+        badge: String(activityForm?.badge || "مجال كشفي").trim(),
+        title: String(activityForm?.title || "").trim(),
+        description: String(activityForm?.description || "").trim(),
+        image:
+          sanitizeImageUrl(activityForm?.image || "") ||
+          String(activityForm?.image || "").trim(),
       };
-
-      return commitState((prev) => ({
+      return updateSiteData((prev) => ({
         ...prev,
-        activities: [...prev.activities, created],
+        activities: [
+          newActivity,
+          ...(Array.isArray(prev.activities) ? prev.activities : []),
+        ],
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const updateActivity = useCallback(
-    (id, updatedFields) => {
-      return commitState((prev) => ({
+    async (id, activityForm) => {
+      return updateSiteData((prev) => ({
         ...prev,
-        activities: prev.activities.map((act) => {
-          if (String(act.id) !== String(id)) return act;
-          return {
-            ...act,
-            badge:
-              updatedFields?.badge !== undefined
-                ? String(updatedFields.badge).trim()
-                : act.badge,
-            title:
-              updatedFields?.title !== undefined
-                ? String(updatedFields.title).trim()
-                : act.title,
-            description:
-              updatedFields?.description !== undefined
-                ? String(updatedFields.description).trim()
-                : act.description,
-            image:
-              updatedFields?.image !== undefined
-                ? String(updatedFields.image).trim()
-                : act.image,
-          };
-        }),
+        activities: (Array.isArray(prev.activities) ? prev.activities : []).map(
+          (item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  badge: String(activityForm?.badge || "مجال كشفي").trim(),
+                  title: String(activityForm?.title || "").trim(),
+                  description: String(activityForm?.description || "").trim(),
+                  image:
+                    sanitizeImageUrl(activityForm?.image || "") ||
+                    String(activityForm?.image || "").trim(),
+                }
+              : item
+        ),
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const deleteActivity = useCallback(
-    (id) => {
-      return commitState((prev) => ({
+    async (id) => {
+      return updateSiteData((prev) => ({
         ...prev,
-        activities: prev.activities.filter(
-          (act) => String(act.id) !== String(id)
+        activities: (Array.isArray(prev.activities) ? prev.activities : []).filter(
+          (item) => item.id !== id
         ),
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const addCommittee = useCallback(
-    (com) => {
-      const tasksArr = Array.isArray(com?.tasks)
-        ? com.tasks
-        : String(com?.tasksText || "")
-            .split("\n")
-            .map((s) => s.trim())
-            .filter(Boolean);
-
-      const skillsArr = Array.isArray(com?.skills)
-        ? com.skills
-        : String(com?.skillsText || "")
-            .split(/[,،\n]/)
-            .map((s) => s.trim())
-            .filter(Boolean);
-
-      const created = {
-        id: Date.now(),
-        title: typeof com?.title === "string" ? com.title.trim() : "",
-        summary: typeof com?.summary === "string" ? com.summary.trim() : "",
-        image: typeof com?.image === "string" ? com.image.trim() : "",
-        tasks: tasksArr,
-        skills: skillsArr,
+    async (committeeForm) => {
+      const newCommittee = {
+        id: createItemId("com"),
+        title: String(committeeForm?.title || "").trim(),
+        summary: String(committeeForm?.summary || "").trim(),
+        image:
+          sanitizeImageUrl(committeeForm?.image || "") ||
+          String(committeeForm?.image || "").trim(),
+        tasks: parseListField(committeeForm?.tasksText ?? committeeForm?.tasks, /\r?\n+/),
+        skills: parseListField(
+          committeeForm?.skillsText ?? committeeForm?.skills,
+          /[,،\n]+/
+        ),
       };
-
-      return commitState((prev) => ({
+      return updateSiteData((prev) => ({
         ...prev,
-        committees: [...prev.committees, created],
+        committees: [
+          newCommittee,
+          ...(Array.isArray(prev.committees) ? prev.committees : []),
+        ],
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const updateCommittee = useCallback(
-    (id, updatedFields) => {
-      return commitState((prev) => ({
+    async (id, committeeForm) => {
+      return updateSiteData((prev) => ({
         ...prev,
-        committees: prev.committees.map((com) => {
-          if (String(com.id) !== String(id)) return com;
-
-          const nextTasks = Array.isArray(updatedFields?.tasks)
-            ? updatedFields.tasks
-            : updatedFields?.tasksText !== undefined
-            ? String(updatedFields.tasksText)
-                .split("\n")
-                .map((s) => s.trim())
-                .filter(Boolean)
-            : com.tasks;
-
-          const nextSkills = Array.isArray(updatedFields?.skills)
-            ? updatedFields.skills
-            : updatedFields?.skillsText !== undefined
-            ? String(updatedFields.skillsText)
-                .split(/[,،\n]/)
-                .map((s) => s.trim())
-                .filter(Boolean)
-            : com.skills;
-
-          return {
-            ...com,
-            title:
-              updatedFields?.title !== undefined
-                ? String(updatedFields.title).trim()
-                : com.title,
-            summary:
-              updatedFields?.summary !== undefined
-                ? String(updatedFields.summary).trim()
-                : com.summary,
-            image:
-              updatedFields?.image !== undefined
-                ? String(updatedFields.image).trim()
-                : com.image,
-            tasks: nextTasks,
-            skills: nextSkills,
-          };
-        }),
+        committees: (Array.isArray(prev.committees) ? prev.committees : []).map(
+          (item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  title: String(committeeForm?.title || "").trim(),
+                  summary: String(committeeForm?.summary || "").trim(),
+                  image:
+                    sanitizeImageUrl(committeeForm?.image || "") ||
+                    String(committeeForm?.image || "").trim(),
+                  tasks: parseListField(
+                    committeeForm?.tasksText ?? committeeForm?.tasks,
+                    /\r?\n+/
+                  ),
+                  skills: parseListField(
+                    committeeForm?.skillsText ?? committeeForm?.skills,
+                    /[,،\n]+/
+                  ),
+                }
+              : item
+        ),
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const deleteCommittee = useCallback(
-    (id) => {
-      return commitState((prev) => ({
+    async (id) => {
+      return updateSiteData((prev) => ({
         ...prev,
-        committees: prev.committees.filter(
-          (com) => String(com.id) !== String(id)
+        committees: (Array.isArray(prev.committees) ? prev.committees : []).filter(
+          (item) => item.id !== id
         ),
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
   const saveDefaultSections = useCallback(
-    (defaultActivities, defaultCommittees) => {
-      return commitState((prev) => ({
+    async (nextActivities, nextCommittees) => {
+      return updateSiteData((prev) => ({
         ...prev,
-        activities: defaultActivities,
-        committees: defaultCommittees,
+        activities: Array.isArray(nextActivities)
+          ? nextActivities
+          : prev.activities,
+        committees: Array.isArray(nextCommittees)
+          ? nextCommittees
+          : prev.committees,
       }));
     },
-    [commitState]
+    [updateSiteData]
   );
 
-  const addJoinRequest = useCallback(
-    (reqData) => {
-      const created = {
-        id: Date.now(),
-        ...reqData,
-        status: "جديد",
-        createdAt: new Date().toISOString().split("T")[0],
-      };
+  const resetToDefault = useCallback(async () => {
+    return updateSiteData(DEFAULT_SITE_DATA);
+  }, [updateSiteData]);
 
-      return commitState((prev) => ({
-        ...prev,
-        joinRequests: [created, ...prev.joinRequests],
-      }));
+  const submitJoinRequest = useCallback(async (reqData) => {
+    setSyncError("");
+    const created = await submitJoinRequestRemote(reqData);
+    return created;
+  }, []);
+
+  const updateJoinRequestStatus = useCallback(
+    async (id, status) => {
+      if (!isAdminAuthenticated) {
+        const msg = "يجب تسجيل دخول الأدمن أولاً.";
+        setSyncError(msg);
+        return { ok: false, cloudError: msg };
+      }
+      try {
+        await updateJoinRequestStatusRemote(id, status);
+        setJoinRequests((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, status } : item))
+        );
+        return { ok: true };
+      } catch (err) {
+        const msg = err?.message || "تعذر تحديث حالة الطلب.";
+        setSyncError(msg);
+        return { ok: false, cloudError: msg };
+      }
     },
-    [commitState]
+    [isAdminAuthenticated]
   );
-
-  const updateRequestStatus = useCallback(
-    (id, status) => {
-      return commitState((prev) => ({
-        ...prev,
-        joinRequests: prev.joinRequests.map((r) =>
-          String(r.id) === String(id) ? { ...r, status } : r
-        ),
-      }));
-    },
-    [commitState]
-  );
-
-  const resetToDefault = useCallback(() => {
-    return commitState(EMPTY_SITE_DATA);
-  }, [commitState]);
-
-  const activeUpcomingEvent =
-    siteData.upcomingEvents.find((ev) => ev.active !== false) || null;
 
   return (
     <SiteContext.Provider
       value={{
         siteData,
-        activeUpcomingEvent,
-        isCloudEnabled: isCloudConfigured,
-        isSyncing,
-        lastSyncError,
-        refreshFromCloud,
+        updateSiteData,
         updateLogoUrl,
         updateHeroBackgroundUrl,
         addUpcomingEvent,
@@ -619,9 +528,22 @@ export function SiteProvider({ children }) {
         updateCommittee,
         deleteCommittee,
         saveDefaultSections,
-        addJoinRequest,
-        updateRequestStatus,
         resetToDefault,
+        refreshFromCloud,
+        joinRequests,
+        refreshJoinRequests: () => loadJoinRequests(session),
+        submitJoinRequest,
+        updateJoinRequestStatus,
+        updateRequestStatus: updateJoinRequestStatus,
+        session,
+        isAdminAuthenticated,
+        isCloudConfigured,
+        isCloudEnabled: isCloudConfigured,
+        isLoading,
+        isSaving,
+        isSyncing: isSaving || isLoading,
+        syncError,
+        lastSyncError: syncError,
       }}
     >
       {children}
@@ -630,5 +552,9 @@ export function SiteProvider({ children }) {
 }
 
 export function useSite() {
-  return useContext(SiteContext);
+  const ctx = useContext(SiteContext);
+  if (!ctx) {
+    throw new Error("useSite يجب أن يُستخدم داخل SiteProvider");
+  }
+  return ctx;
 }
