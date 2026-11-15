@@ -4,6 +4,7 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useRef,
 } from "react";
 import {
   isCloudConfigured,
@@ -92,6 +93,9 @@ export function SiteProvider({ children }) {
     }
   });
 
+  const siteDataRef = useRef(siteData);
+  siteDataRef.current = siteData;
+
   const [joinRequests, setJoinRequests] = useState([]);
   const [session, setSession] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -122,6 +126,7 @@ export function SiteProvider({ children }) {
       if (remote?.data) {
         const cleaned = sanitizeSitePayload(remote.data);
         setSiteData(cleaned);
+        siteDataRef.current = cleaned;
         try {
           localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cleaned));
         } catch {
@@ -155,6 +160,7 @@ export function SiteProvider({ children }) {
           if (active && remote?.data) {
             const cleaned = sanitizeSitePayload(remote.data);
             setSiteData(cleaned);
+            siteDataRef.current = cleaned;
             try {
               localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cleaned));
             } catch {
@@ -189,21 +195,23 @@ export function SiteProvider({ children }) {
 
   const updateSiteData = useCallback(async (updaterOrValue) => {
     setSyncError("");
-    let nextData;
+    const current = siteDataRef.current;
+    const rawNext =
+      typeof updaterOrValue === "function"
+        ? updaterOrValue(current)
+        : updaterOrValue;
+    const nextData = sanitizeSitePayload(rawNext);
 
-    setSiteData((prev) => {
-      const rawNext =
-        typeof updaterOrValue === "function" ? updaterOrValue(prev) : updaterOrValue;
-      nextData = sanitizeSitePayload(rawNext);
-      try {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextData));
-      } catch {
-        // تجاهل خطأ امتلاء التخزين المحلي
-      }
-      return nextData;
-    });
+    setSiteData(nextData);
+    siteDataRef.current = nextData;
 
-    if (isCloudConfigured && nextData) {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextData));
+    } catch {
+      // تجاهل خطأ امتلاء التخزين المحلي
+    }
+
+    if (isCloudConfigured) {
       setIsSaving(true);
       try {
         await saveRemoteSiteData(nextData);
@@ -403,7 +411,10 @@ export function SiteProvider({ children }) {
         image:
           sanitizeImageUrl(committeeForm?.image || "") ||
           String(committeeForm?.image || "").trim(),
-        tasks: parseListField(committeeForm?.tasksText ?? committeeForm?.tasks, /\r?\n+/),
+        tasks: parseListField(
+          committeeForm?.tasksText ?? committeeForm?.tasks,
+          /\r?\n+/
+        ),
         skills: parseListField(
           committeeForm?.skillsText ?? committeeForm?.skills,
           /[,،\n]+/

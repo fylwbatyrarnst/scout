@@ -78,6 +78,7 @@ export default function AdminDashboard() {
     siteData,
     isCloudEnabled,
     isSyncing,
+    isSaving,
     lastSyncError,
     refreshFromCloud,
     updateLogoUrl,
@@ -149,6 +150,16 @@ export default function AdminDashboard() {
     setLogoInput(siteData.logoUrl || "/rover-logo.svg");
     setHeroBgInput(siteData.heroBackgroundUrl || "");
   }, [siteData.logoUrl, siteData.heroBackgroundUrl]);
+
+  const formatSaveMessage = (res, successText, localPrefix) => {
+    if (!isCloudEnabled) {
+      return `${localPrefix} (وضع محلي فقط — تأكد من إعدادات Supabase).`;
+    }
+    if (res?.ok === false) {
+      return `${localPrefix} وتعذر الحفظ السحابي: ${res.cloudError}`;
+    }
+    return `${successText} (تم الحفظ سحابياً).`;
+  };
 
   const handleFileChange = async (
     e,
@@ -232,9 +243,7 @@ export default function AdminDashboard() {
     const res = await updateUpcomingEvent(editingEventId, payload);
     setEditingEventId(null);
     setEventNotice(
-      res?.ok === false
-        ? `تم التحديث محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "تم تحديث بيانات الحدث."
+      formatSaveMessage(res, "تم تحديث بيانات الحدث", "تم التحديث محلياً")
     );
     setTimeout(() => setEventNotice(""), 4000);
   };
@@ -250,9 +259,7 @@ export default function AdminDashboard() {
       setNewEventForm(EMPTY_EVENT);
     }
     setEventNotice(
-      res?.ok === false
-        ? `تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "تمت إضافة الحدث الجديد."
+      formatSaveMessage(res, "تمت إضافة الحدث الجديد", "تمت الإضافة محلياً")
     );
     setTimeout(() => setEventNotice(""), 4000);
   };
@@ -260,9 +267,7 @@ export default function AdminDashboard() {
   const handleDeleteEvent = async (id) => {
     const res = await deleteUpcomingEvent(id);
     setEventNotice(
-      res?.ok === false
-        ? `تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
-        : "تم حذف الحدث."
+      formatSaveMessage(res, "تم حذف الحدث", "تم الحذف محلياً")
     );
     setTimeout(() => setEventNotice(""), 4000);
   };
@@ -284,9 +289,11 @@ export default function AdminDashboard() {
       });
     }
     setGalleryNotice(
-      res?.ok === false
-        ? `تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "تمت إضافة الفعالية للمعرض."
+      formatSaveMessage(
+        res,
+        "تمت إضافة الفعالية للمعرض",
+        "تمت الإضافة محلياً"
+      )
     );
     setTimeout(() => setGalleryNotice(""), 4000);
   };
@@ -294,9 +301,11 @@ export default function AdminDashboard() {
   const handleDeleteGallery = async (id) => {
     const res = await deleteGalleryItem(id);
     setGalleryNotice(
-      res?.ok === false
-        ? `تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
-        : "تم حذف الفعالية من المعرض."
+      formatSaveMessage(
+        res,
+        "تم حذف الفعالية من المعرض",
+        "تم الحذف محلياً"
+      )
     );
     setTimeout(() => setGalleryNotice(""), 4000);
   };
@@ -313,9 +322,7 @@ export default function AdminDashboard() {
       setNewActivityForm(EMPTY_ACTIVITY);
     }
     setActivityNotice(
-      res?.ok === false
-        ? `تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "تمت إضافة مجال النشاط."
+      formatSaveMessage(res, "تمت إضافة مجال النشاط", "تمت الإضافة محلياً")
     );
     setTimeout(() => setActivityNotice(""), 4000);
   };
@@ -342,9 +349,7 @@ export default function AdminDashboard() {
     const res = await updateActivity(editingActivityId, payload);
     setEditingActivityId(null);
     setActivityNotice(
-      res?.ok === false
-        ? `تم التحديث محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "تم تحديث مجال النشاط."
+      formatSaveMessage(res, "تم تحديث مجال النشاط", "تم التحديث محلياً")
     );
     setTimeout(() => setActivityNotice(""), 4000);
   };
@@ -352,9 +357,7 @@ export default function AdminDashboard() {
   const handleDeleteActivity = async (id) => {
     const res = await deleteActivity(id);
     setActivityNotice(
-      res?.ok === false
-        ? `تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
-        : "تم حذف مجال النشاط."
+      formatSaveMessage(res, "تم حذف مجال النشاط", "تم الحذف محلياً")
     );
     setTimeout(() => setActivityNotice(""), 4000);
   };
@@ -372,9 +375,7 @@ export default function AdminDashboard() {
       setNewCommitteeForm(EMPTY_COMMITTEE);
     }
     setCommitteeNotice(
-      res?.ok === false
-        ? `تمت الإضافة محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "تمت إضافة اللجنة النوعية."
+      formatSaveMessage(res, "تمت إضافة اللجنة النوعية", "تمت الإضافة محلياً")
     );
     setTimeout(() => setCommitteeNotice(""), 4000);
   };
@@ -402,9 +403,7 @@ export default function AdminDashboard() {
     const res = await updateCommittee(editingCommitteeId, payload);
     setEditingCommitteeId(null);
     setCommitteeNotice(
-      res?.ok === false
-        ? `تم التحديث محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "تم تحديث بيانات اللجنة."
+      formatSaveMessage(res, "تم تحديث بيانات اللجنة", "تم التحديث محلياً")
     );
     setTimeout(() => setCommitteeNotice(""), 4000);
   };
@@ -412,9 +411,7 @@ export default function AdminDashboard() {
   const handleDeleteCommittee = async (id) => {
     const res = await deleteCommittee(id);
     setCommitteeNotice(
-      res?.ok === false
-        ? `تم الحذف محلياً وتعذر حفظه على السحابة: ${res.cloudError}`
-        : "تم حذف اللجنة."
+      formatSaveMessage(res, "تم حذف اللجنة", "تم الحذف محلياً")
     );
     setTimeout(() => setCommitteeNotice(""), 4000);
   };
@@ -428,10 +425,11 @@ export default function AdminDashboard() {
         ? DEFAULT_COMMITTEES
         : siteData.committees
     );
-    const msg =
-      res?.ok === false
-        ? `تم التحميل محلياً وتعذر الحفظ السحابي: ${res.cloudError}`
-        : "تم تحميل البيانات الافتراضية بالصور.";
+    const msg = formatSaveMessage(
+      res,
+      "تم تحميل البيانات الافتراضية بالصور",
+      "تم التحميل محلياً"
+    );
     if (sectionType === "activities") setActivityNotice(msg);
     else setCommitteeNotice(msg);
     setTimeout(() => {
@@ -578,6 +576,7 @@ export default function AdminDashboard() {
           {isCloudEnabled && (
             <button
               type="button"
+              disabled={isSaving}
               onClick={() => {
                 if (refreshFromCloud) refreshFromCloud();
                 if (refreshJoinRequests) refreshJoinRequests();
@@ -823,8 +822,12 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="d-flex gap-2">
-                      <button type="submit" className="btn btn-gold flex-grow-1">
-                        حفظ التعديل
+                      <button
+                        type="submit"
+                        disabled={isSaving}
+                        className="btn btn-gold flex-grow-1"
+                      >
+                        {isSaving ? "جاري الحفظ..." : "حفظ التعديل"}
                       </button>
                       <button
                         type="button"
@@ -974,8 +977,12 @@ export default function AdminDashboard() {
                       ></textarea>
                     </div>
 
-                    <button type="submit" className="btn btn-gold w-100">
-                      + إضافة حدث جديد
+                    <button
+                      type="submit"
+                      disabled={isSaving}
+                      className="btn btn-gold w-100"
+                    >
+                      {isSaving ? "جاري الحفظ..." : "+ إضافة حدث جديد"}
                     </button>
                   </form>
                 )}
@@ -1184,8 +1191,12 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="d-flex gap-2">
-                      <button type="submit" className="btn btn-gold flex-grow-1">
-                        حفظ التعديل
+                      <button
+                        type="submit"
+                        disabled={isSaving}
+                        className="btn btn-gold flex-grow-1"
+                      >
+                        {isSaving ? "جاري الحفظ..." : "حفظ التعديل"}
                       </button>
                       <button
                         type="button"
@@ -1302,8 +1313,12 @@ export default function AdminDashboard() {
                       ></textarea>
                     </div>
 
-                    <button type="submit" className="btn btn-gold w-100">
-                      + إضافة مجال نشاط
+                    <button
+                      type="submit"
+                      disabled={isSaving}
+                      className="btn btn-gold w-100"
+                    >
+                      {isSaving ? "جاري الحفظ..." : "+ إضافة مجال نشاط"}
                     </button>
                   </form>
                 )}
@@ -1523,8 +1538,12 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="d-flex gap-2">
-                      <button type="submit" className="btn btn-gold flex-grow-1">
-                        حفظ التعديل
+                      <button
+                        type="submit"
+                        disabled={isSaving}
+                        className="btn btn-gold flex-grow-1"
+                      >
+                        {isSaving ? "جاري الحفظ..." : "حفظ التعديل"}
                       </button>
                       <button
                         type="button"
@@ -1659,8 +1678,12 @@ export default function AdminDashboard() {
                       />
                     </div>
 
-                    <button type="submit" className="btn btn-gold w-100">
-                      + إضافة لجنة
+                    <button
+                      type="submit"
+                      disabled={isSaving}
+                      className="btn btn-gold w-100"
+                    >
+                      {isSaving ? "جاري الحفظ..." : "+ إضافة لجنة"}
                     </button>
                   </form>
                 )}
@@ -1854,8 +1877,12 @@ export default function AdminDashboard() {
                     ></textarea>
                   </div>
 
-                  <button type="submit" className="btn btn-gold w-100">
-                    + إضافة للمعرض
+                  <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="btn btn-gold w-100"
+                  >
+                    {isSaving ? "جاري الحفظ..." : "+ إضافة للمعرض"}
                   </button>
                   {galleryNotice && (
                     <div className="text-warning small fw-bold text-center mt-2">
@@ -2028,8 +2055,12 @@ export default function AdminDashboard() {
                       />
                     </div>
                   )}
-                  <button type="submit" className="btn btn-gold w-100">
-                    حفظ الشعار
+                  <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="btn btn-gold w-100"
+                  >
+                    {isSaving ? "جاري الحفظ..." : "حفظ الشعار"}
                   </button>
                   {logoSaved && (
                     <div className="text-warning small fw-bold text-center mt-2">
@@ -2087,8 +2118,12 @@ export default function AdminDashboard() {
                     </div>
                   )}
                   <div className="d-flex gap-2">
-                    <button type="submit" className="btn btn-gold flex-grow-1">
-                      حفظ الخلفية
+                    <button
+                      type="submit"
+                      disabled={isSaving}
+                      className="btn btn-gold flex-grow-1"
+                    >
+                      {isSaving ? "جاري الحفظ..." : "حفظ الخلفية"}
                     </button>
                     <button
                       type="button"

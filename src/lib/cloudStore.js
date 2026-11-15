@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
-const RAW_URL = (import.meta.env.VITE_SUPABASE_URL || "").trim().replace(/\/+$/, "");
+const RAW_URL = (import.meta.env.VITE_SUPABASE_URL || "")
+  .trim()
+  .replace(/\/+$/, "");
 const RAW_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
 
 const STORAGE_BUCKET = "rover-media";
@@ -123,17 +125,34 @@ export async function saveRemoteSiteData(siteData) {
     return { configured: false };
   }
 
-  const { error } = await supabase.from("site_config").upsert(
-    {
-      id: CONFIG_ROW_ID,
-      site_data: siteData,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "id" }
-  );
+  const cleanPayload = JSON.parse(JSON.stringify(siteData || {}));
+  const nowIso = new Date().toISOString();
 
-  if (error) {
-    throw new Error(`تعذر حفظ التعديلات: ${error.message}`);
+  // 1) محاولة تحديث الصف الرئيسي مباشرة
+  const { data: updatedRows, error: updateError } = await supabase
+    .from("site_config")
+    .update({
+      site_data: cleanPayload,
+      updated_at: nowIso,
+    })
+    .eq("id", CONFIG_ROW_ID)
+    .select("id");
+
+  if (updateError) {
+    throw new Error(`تعذر حفظ التعديلات: ${updateError.message}`);
+  }
+
+  // 2) لو الصف مكنش موجود أصلاً، ننشئه بـ insert
+  if (!Array.isArray(updatedRows) || updatedRows.length === 0) {
+    const { error: insertError } = await supabase.from("site_config").insert({
+      id: CONFIG_ROW_ID,
+      site_data: cleanPayload,
+      updated_at: nowIso,
+    });
+
+    if (insertError) {
+      throw new Error(`تعذر إنشاء سجل الإعدادات: ${insertError.message}`);
+    }
   }
 
   return { configured: true };
@@ -145,7 +164,9 @@ export async function uploadImageToCloud(file, folder = "general") {
   }
 
   if (!file || !ALLOWED_MIME_TYPES.has(file.type)) {
-    throw new Error("يُسمح فقط بملفات الصور بصيغة JPG أو PNG أو WEBP أو GIF.");
+    throw new Error(
+      "يُسمح فقط بملفات الصور بصيغة JPG أو PNG أو WEBP أو GIF."
+    );
   }
 
   const extMap = {
@@ -155,7 +176,10 @@ export async function uploadImageToCloud(file, folder = "general") {
     "image/gif": "gif",
   };
   const ext = extMap[file.type] || "jpg";
-  const safeFolder = String(folder || "general").replace(/[^a-zA-Z0-9_-]/g, "");
+  const safeFolder = String(folder || "general").replace(
+    /[^a-zA-Z0-9_-]/g,
+    ""
+  );
   const filePath = `${safeFolder}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
 
   const { error: uploadError } = await supabase.storage
@@ -170,9 +194,7 @@ export async function uploadImageToCloud(file, folder = "general") {
     throw new Error(`فشل رفع الصورة: ${uploadError.message}`);
   }
 
-  const { data } = supabase.storage
-    .from(STORAGE_BUCKET)
-    .getPublicUrl(filePath);
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath);
 
   const safeUrl = sanitizeImageUrl(data?.publicUrl || "");
   if (!safeUrl) {
