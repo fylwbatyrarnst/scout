@@ -1,356 +1,560 @@
-import React, { useState, useEffect } from "react";
-import { useSite } from "../context/SiteContext";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+} from "react";
+import {
+  isCloudConfigured,
+  fetchRemoteSiteData,
+  saveRemoteSiteData,
+  getCurrentSession,
+  onAuthStateChange,
+  submitJoinRequestRemote,
+  fetchJoinRequestsRemote,
+  updateJoinRequestStatusRemote,
+  sanitizeImageUrl,
+} from "../lib/cloudStore";
 
-const EGYPT_PHONE_REGEX = /^(010|011|012|015)\d{8}$/;
-const NAME_CHARS_REGEX = /^[\u0600-\u06FFa-zA-Z\s]+$/;
+const SiteContext = createContext(null);
+const LOCAL_STORAGE_KEY = "asu_rover_site_data_v1";
 
-function validateFullName(rawName) {
-  const cleaned = rawName.trim().replace(/\s+/g, " ");
-  if (!cleaned) return "من فضلك أدخل الاسم الثلاثي.";
-  if (!NAME_CHARS_REGEX.test(cleaned)) {
-    return "الاسم يجب أن يحتوي على حروف فقط بدون أرقام أو رموز.";
+const DEFAULT_SITE_DATA = {
+  logoUrl: "/rover-logo.svg",
+  heroBackgroundUrl: "",
+  heroTitle: "",
+  heroSubtitle: "",
+  heroImage: "",
+  upcomingEvents: [],
+  events: [],
+  gallery: [],
+  activities: [],
+  committees: [],
+  joinRequests: [],
+};
+
+function createItemId(prefix = "item") {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return `${prefix}-${crypto.randomUUID()}`;
   }
-  const parts = cleaned.split(" ").filter((p) => p.length >= 2);
-  if (parts.length < 3) {
-    return "من فضلك اكتب الاسم الثلاثي كاملاً (3 أسماء على الأقل، كل اسم حرفان فأكثر).";
-  }
-  return "";
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function validatePhone(rawPhone) {
-  const digitsOnly = rawPhone.replace(/\D/g, "");
-  if (!EGYPT_PHONE_REGEX.test(digitsOnly)) {
-    return "أدخل رقم هاتف مصري صحيح مكون من 11 رقماً يبدأ بـ 010 أو 011 أو 012 أو 015.";
+function parseListField(value, delimiterRegex) {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v).trim()).filter(Boolean);
   }
-  return "";
+  if (typeof value !== "string") return [];
+  return value
+    .split(delimiterRegex)
+    .map((v) => v.trim())
+    .filter(Boolean);
 }
 
-function createChallenge() {
-  const a = Math.floor(Math.random() * 6) + 2; // 2..7
-  const b = Math.floor(Math.random() * 5) + 1; // 1..5
-  return { a, b, answer: String(a + b) };
+function sanitizeSitePayload(raw) {
+  if (!raw || typeof raw !== "object") return DEFAULT_SITE_DATA;
+  const { joinRequests: _ignoredRequests, ...rest } = raw;
+
+  const normalizedEvents = Array.isArray(rest.upcomingEvents)
+    ? rest.upcomingEvents
+    : Array.isArray(rest.events)
+    ? rest.events
+    : [];
+
+  return {
+    ...DEFAULT_SITE_DATA,
+    ...rest,
+    logoUrl:
+      sanitizeImageUrl(rest.logoUrl || "") ||
+      rest.logoUrl ||
+      DEFAULT_SITE_DATA.logoUrl,
+    heroBackgroundUrl:
+      sanitizeImageUrl(rest.heroBackgroundUrl || "") ||
+      rest.heroBackgroundUrl ||
+      "",
+    heroImage: sanitizeImageUrl(rest.heroImage || "") || rest.heroImage || "",
+    upcomingEvents: normalizedEvents,
+    events: Array.isArray(rest.events) ? rest.events : normalizedEvents,
+    gallery: Array.isArray(rest.gallery) ? rest.gallery : [],
+    activities: Array.isArray(rest.activities) ? rest.activities : [],
+    committees: Array.isArray(rest.committees) ? rest.committees : [],
+  };
 }
 
-export default function JoinModal({ show, onClose }) {
-  const { submitJoinRequest, siteData } = useSite();
-
-  const defaultCommittee =
-    siteData?.committees?.[0]?.title || "لجنة الميديا";
-
-  const [form, setForm] = useState({
-    name: "",
-    year: "الفرقة الأولى",
-    phone: "",
-    committee: defaultCommittee,
-    website: "", // Honeypot ضد البوتات
+export function SiteProvider({ children }) {
+  const [siteData, setSiteData] = useState(() => {
+    try {
+      const cached = localStorage.getItem(LOCAL_STORAGE_KEY);
+      return cached ? sanitizeSitePayload(JSON.parse(cached)) : DEFAULT_SITE_DATA;
+    } catch {
+      return DEFAULT_SITE_DATA;
+    }
   });
 
-  const [challenge, setChallenge] = useState(createChallenge);
-  const [captchaAnswer, setCaptchaAnswer] = useState("");
-  const [errors, setErrors] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [syncWarning, setSyncWarning] = useState("");
+  const [joinRequests, setJoinRequests] = useState([]);
+  const [session, setSession] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [syncError, setSyncError] = useState("");
+
+  const isAdminAuthenticated = Boolean(session?.user);
+
+  const loadJoinRequests = useCallback(async (activeSession) => {
+    if (!activeSession?.user || !isCloudConfigured) {
+      setJoinRequests([]);
+      return;
+    }
+    try {
+      const rows = await fetchJoinRequestsRemote();
+      setJoinRequests(rows);
+    } catch (err) {
+      setSyncError(err?.message || "تعذر تحميل طلبات الانضمام.");
+    }
+  }, []);
+
+  const refreshFromCloud = useCallback(async () => {
+    if (!isCloudConfigured) return null;
+    setIsSaving(true);
+    setSyncError("");
+    try {
+      const remote = await fetchRemoteSiteData();
+      if (remote?.data) {
+        const cleaned = sanitizeSitePayload(remote.data);
+        setSiteData(cleaned);
+        try {
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cleaned));
+        } catch {
+          // تجاهل خطأ التخزين المحلي
+        }
+        return cleaned;
+      }
+      return null;
+    } catch (err) {
+      const msg = err?.message || "تعذر مزامنة بيانات الموقع.";
+      setSyncError(msg);
+      return null;
+    } finally {
+      setIsSaving(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (show) {
-      setChallenge(createChallenge());
-      setCaptchaAnswer("");
-      setErrors({});
-      setSyncWarning("");
-      setForm((prev) => ({
-        ...prev,
-        committee: prev.committee || defaultCommittee,
-      }));
-    }
-  }, [show, defaultCommittee]);
+    let active = true;
 
-  if (!show) return null;
+    async function init() {
+      setIsLoading(true);
+      setSyncError("");
 
-  const validateAll = () => {
-    const nextErrors = {};
+      const currentSession = await getCurrentSession();
+      if (active) setSession(currentSession);
 
-    if (form.website.trim() !== "") {
-      nextErrors.general = "تعذر إرسال الطلب، حاول مرة أخرى.";
-    }
-
-    const nameErr = validateFullName(form.name);
-    if (nameErr) nextErrors.name = nameErr;
-
-    const phoneErr = validatePhone(form.phone);
-    if (phoneErr) nextErrors.phone = phoneErr;
-
-    if (captchaAnswer.trim() !== challenge.answer) {
-      nextErrors.captcha = `تأكيد الأمان غير صحيح: ما ناتج ${challenge.a} + ${challenge.b}؟`;
-    }
-
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (isSubmitting) return;
-
-    if (!validateAll()) return;
-
-    setIsSubmitting(true);
-    setSyncWarning("");
-    setErrors({});
-
-    const cleanedName = form.name.trim().replace(/\s+/g, " ");
-    const cleanedPhone = form.phone.replace(/\D/g, "");
-
-    const withTimeout = (promise, ms = 12000) =>
-      Promise.race([
-        promise,
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error("انتهت مهلة الاتصال، حاول مرة أخرى.")),
-            ms
-          )
-        ),
-      ]);
-
-    try {
-      const result = await withTimeout(
-        submitJoinRequest({
-          name: cleanedName,
-          year: form.year,
-          phone: cleanedPhone,
-          committee: form.committee,
-          status: "جديد",
-        }),
-        12000
-      );
-
-      if (result && result.synced === false) {
-        setSyncWarning(
-          result.warning ||
-            "تم حفظ الطلب محلياً، وسيتمتزامن مع قاعدة البيانات عند توفر الاتصال."
-        );
+      if (isCloudConfigured) {
+        try {
+          const remote = await fetchRemoteSiteData();
+          if (active && remote?.data) {
+            const cleaned = sanitizeSitePayload(remote.data);
+            setSiteData(cleaned);
+            try {
+              localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cleaned));
+            } catch {
+              // تجاهل خطأ التخزين المحلي
+            }
+          }
+        } catch (err) {
+          if (active) setSyncError(err?.message || "تعذر مزامنة بيانات الموقع.");
+        }
       }
 
-      setSubmitted(true);
-    } catch (err) {
-      console.error("Join request submit error:", err);
-      setErrors((prev) => ({
-        ...prev,
-        general:
-          err?.message ||
-          "تعذر إرسال الطلب الآن. تأكد من الاتصال والبيانات ثم حاول مرة أخرى.",
-      }));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+      if (active && currentSession?.user) {
+        await loadJoinRequests(currentSession);
+      }
 
-  const resetAndClose = () => {
-    setSubmitted(false);
-    setSyncWarning("");
-    setErrors({});
-    setCaptchaAnswer("");
-    setChallenge(createChallenge());
-    setForm({
-      name: "",
-      year: "الفرقة الأولى",
-      phone: "",
-      committee: defaultCommittee,
-      website: "",
+      if (active) setIsLoading(false);
+    }
+
+    init();
+
+    const { data: authListener } = onAuthStateChange(async (nextSession) => {
+      if (!active) return;
+      setSession(nextSession);
+      await loadJoinRequests(nextSession);
     });
-    onClose();
-  };
+
+    return () => {
+      active = false;
+      authListener?.subscription?.unsubscribe();
+    };
+  }, [loadJoinRequests]);
+
+  const updateSiteData = useCallback(async (updaterOrValue) => {
+    setSyncError("");
+    let nextData;
+
+    setSiteData((prev) => {
+      const rawNext =
+        typeof updaterOrValue === "function" ? updaterOrValue(prev) : updaterOrValue;
+      nextData = sanitizeSitePayload(rawNext);
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextData));
+      } catch {
+        // تجاهل خطأ امتلاء التخزين المحلي
+      }
+      return nextData;
+    });
+
+    if (isCloudConfigured && nextData) {
+      setIsSaving(true);
+      try {
+        await saveRemoteSiteData(nextData);
+        return { ok: true };
+      } catch (err) {
+        const msg = err?.message || "تعذر حفظ البيانات سحابياً.";
+        setSyncError(msg);
+        return { ok: false, cloudError: msg };
+      } finally {
+        setIsSaving(false);
+      }
+    }
+
+    return { ok: true };
+  }, []);
+
+  const updateLogoUrl = useCallback(
+    async (logoUrl) => {
+      const cleanUrl = sanitizeImageUrl(logoUrl) || String(logoUrl || "").trim();
+      return updateSiteData((prev) => ({
+        ...prev,
+        logoUrl: cleanUrl || DEFAULT_SITE_DATA.logoUrl,
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const updateHeroBackgroundUrl = useCallback(
+    async (heroBackgroundUrl) => {
+      const cleanUrl =
+        sanitizeImageUrl(heroBackgroundUrl) ||
+        String(heroBackgroundUrl || "").trim();
+      return updateSiteData((prev) => ({
+        ...prev,
+        heroBackgroundUrl: cleanUrl,
+        heroImage: cleanUrl,
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const addUpcomingEvent = useCallback(
+    async (eventForm) => {
+      const newEvent = {
+        id: createItemId("evt"),
+        active: eventForm?.active !== false,
+        title: String(eventForm?.title || "").trim(),
+        date: eventForm?.date || "",
+        location: String(eventForm?.location || "").trim(),
+        description: String(eventForm?.description || "").trim(),
+        shortDesc: String(eventForm?.description || "").trim(),
+        image:
+          sanitizeImageUrl(eventForm?.image || "") ||
+          String(eventForm?.image || "").trim(),
+      };
+      return updateSiteData((prev) => {
+        const list = Array.isArray(prev.upcomingEvents) ? prev.upcomingEvents : [];
+        const updated = [newEvent, ...list];
+        return { ...prev, upcomingEvents: updated, events: updated };
+      });
+    },
+    [updateSiteData]
+  );
+
+  const updateUpcomingEvent = useCallback(
+    async (id, eventForm) => {
+      return updateSiteData((prev) => {
+        const list = Array.isArray(prev.upcomingEvents) ? prev.upcomingEvents : [];
+        const updated = list.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                active: eventForm?.active !== false,
+                title: String(eventForm?.title || "").trim(),
+                date: eventForm?.date || "",
+                location: String(eventForm?.location || "").trim(),
+                description: String(eventForm?.description || "").trim(),
+                shortDesc: String(eventForm?.description || "").trim(),
+                image:
+                  sanitizeImageUrl(eventForm?.image || "") ||
+                  String(eventForm?.image || "").trim(),
+              }
+            : item
+        );
+        return { ...prev, upcomingEvents: updated, events: updated };
+      });
+    },
+    [updateSiteData]
+  );
+
+  const deleteUpcomingEvent = useCallback(
+    async (id) => {
+      return updateSiteData((prev) => {
+        const list = Array.isArray(prev.upcomingEvents) ? prev.upcomingEvents : [];
+        const updated = list.filter((item) => item.id !== id);
+        return { ...prev, upcomingEvents: updated, events: updated };
+      });
+    },
+    [updateSiteData]
+  );
+
+  const addGalleryItem = useCallback(
+    async (galleryForm) => {
+      const newItem = {
+        id: createItemId("gal"),
+        title: String(galleryForm?.title || "").trim(),
+        icon: String(galleryForm?.icon || "").trim(),
+        shortDesc: String(galleryForm?.shortDesc || "").trim(),
+        details: String(galleryForm?.details || "").trim(),
+        image:
+          sanitizeImageUrl(galleryForm?.image || "") ||
+          String(galleryForm?.image || "").trim(),
+      };
+      return updateSiteData((prev) => ({
+        ...prev,
+        gallery: [newItem, ...(Array.isArray(prev.gallery) ? prev.gallery : [])],
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const deleteGalleryItem = useCallback(
+    async (id) => {
+      return updateSiteData((prev) => ({
+        ...prev,
+        gallery: (Array.isArray(prev.gallery) ? prev.gallery : []).filter(
+          (item) => item.id !== id
+        ),
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const addActivity = useCallback(
+    async (activityForm) => {
+      const newActivity = {
+        id: createItemId("act"),
+        badge: String(activityForm?.badge || "مجال كشفي").trim(),
+        title: String(activityForm?.title || "").trim(),
+        description: String(activityForm?.description || "").trim(),
+        image:
+          sanitizeImageUrl(activityForm?.image || "") ||
+          String(activityForm?.image || "").trim(),
+      };
+      return updateSiteData((prev) => ({
+        ...prev,
+        activities: [
+          newActivity,
+          ...(Array.isArray(prev.activities) ? prev.activities : []),
+        ],
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const updateActivity = useCallback(
+    async (id, activityForm) => {
+      return updateSiteData((prev) => ({
+        ...prev,
+        activities: (Array.isArray(prev.activities) ? prev.activities : []).map(
+          (item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  badge: String(activityForm?.badge || "مجال كشفي").trim(),
+                  title: String(activityForm?.title || "").trim(),
+                  description: String(activityForm?.description || "").trim(),
+                  image:
+                    sanitizeImageUrl(activityForm?.image || "") ||
+                    String(activityForm?.image || "").trim(),
+                }
+              : item
+        ),
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const deleteActivity = useCallback(
+    async (id) => {
+      return updateSiteData((prev) => ({
+        ...prev,
+        activities: (Array.isArray(prev.activities) ? prev.activities : []).filter(
+          (item) => item.id !== id
+        ),
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const addCommittee = useCallback(
+    async (committeeForm) => {
+      const newCommittee = {
+        id: createItemId("com"),
+        title: String(committeeForm?.title || "").trim(),
+        summary: String(committeeForm?.summary || "").trim(),
+        image:
+          sanitizeImageUrl(committeeForm?.image || "") ||
+          String(committeeForm?.image || "").trim(),
+        tasks: parseListField(committeeForm?.tasksText ?? committeeForm?.tasks, /\r?\n+/),
+        skills: parseListField(
+          committeeForm?.skillsText ?? committeeForm?.skills,
+          /[,،\n]+/
+        ),
+      };
+      return updateSiteData((prev) => ({
+        ...prev,
+        committees: [
+          newCommittee,
+          ...(Array.isArray(prev.committees) ? prev.committees : []),
+        ],
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const updateCommittee = useCallback(
+    async (id, committeeForm) => {
+      return updateSiteData((prev) => ({
+        ...prev,
+        committees: (Array.isArray(prev.committees) ? prev.committees : []).map(
+          (item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  title: String(committeeForm?.title || "").trim(),
+                  summary: String(committeeForm?.summary || "").trim(),
+                  image:
+                    sanitizeImageUrl(committeeForm?.image || "") ||
+                    String(committeeForm?.image || "").trim(),
+                  tasks: parseListField(
+                    committeeForm?.tasksText ?? committeeForm?.tasks,
+                    /\r?\n+/
+                  ),
+                  skills: parseListField(
+                    committeeForm?.skillsText ?? committeeForm?.skills,
+                    /[,،\n]+/
+                  ),
+                }
+              : item
+        ),
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const deleteCommittee = useCallback(
+    async (id) => {
+      return updateSiteData((prev) => ({
+        ...prev,
+        committees: (Array.isArray(prev.committees) ? prev.committees : []).filter(
+          (item) => item.id !== id
+        ),
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const saveDefaultSections = useCallback(
+    async (nextActivities, nextCommittees) => {
+      return updateSiteData((prev) => ({
+        ...prev,
+        activities: Array.isArray(nextActivities)
+          ? nextActivities
+          : prev.activities,
+        committees: Array.isArray(nextCommittees)
+          ? nextCommittees
+          : prev.committees,
+      }));
+    },
+    [updateSiteData]
+  );
+
+  const resetToDefault = useCallback(async () => {
+    return updateSiteData(DEFAULT_SITE_DATA);
+  }, [updateSiteData]);
+
+  const submitJoinRequest = useCallback(async (reqData) => {
+    setSyncError("");
+    const created = await submitJoinRequestRemote(reqData);
+    return created;
+  }, []);
+
+  const updateJoinRequestStatus = useCallback(
+    async (id, status) => {
+      if (!isAdminAuthenticated) {
+        const msg = "يجب تسجيل دخول الأدمن أولاً.";
+        setSyncError(msg);
+        return { ok: false, cloudError: msg };
+      }
+      try {
+        await updateJoinRequestStatusRemote(id, status);
+        setJoinRequests((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, status } : item))
+        );
+        return { ok: true };
+      } catch (err) {
+        const msg = err?.message || "تعذر تحديث حالة الطلب.";
+        setSyncError(msg);
+        return { ok: false, cloudError: msg };
+      }
+    },
+    [isAdminAuthenticated]
+  );
 
   return (
-    <div
-      className="modal show d-block"
-      style={{ backgroundColor: "rgba(0,0,0,0.75)" }}
+    <SiteContext.Provider
+      value={{
+        siteData,
+        updateSiteData,
+        updateLogoUrl,
+        updateHeroBackgroundUrl,
+        addUpcomingEvent,
+        updateUpcomingEvent,
+        deleteUpcomingEvent,
+        addGalleryItem,
+        deleteGalleryItem,
+        addActivity,
+        updateActivity,
+        deleteActivity,
+        addCommittee,
+        updateCommittee,
+        deleteCommittee,
+        saveDefaultSections,
+        resetToDefault,
+        refreshFromCloud,
+        joinRequests,
+        refreshJoinRequests: () => loadJoinRequests(session),
+        submitJoinRequest,
+        updateJoinRequestStatus,
+        updateRequestStatus: updateJoinRequestStatus,
+        session,
+        isAdminAuthenticated,
+        isCloudConfigured,
+        isCloudEnabled: isCloudConfigured,
+        isLoading,
+        isSaving,
+        isSyncing: isSaving || isLoading,
+        syncError,
+        lastSyncError: syncError,
+      }}
     >
-      <div className="modal-dialog modal-dialog-centered">
-        <div className="modal-content rover-modal-content shadow">
-          <div className="modal-header border-secondary">
-            <h5 className="modal-title fw-bold text-warning">
-              ⚜️ انضم لعشيرة جوالة علوم عين شمس
-            </h5>
-            <button
-              type="button"
-              className="btn-close btn-close-white"
-              onClick={resetAndClose}
-            ></button>
-          </div>
-
-          <div className="modal-body p-4">
-            {submitted ? (
-              <div className="text-center py-4">
-                <div className="display-3 text-warning mb-3">
-                  <i className="bi bi-check-circle-fill"></i>
-                </div>
-                <h4 className="fw-bold text-white mb-2">
-                  تم تسجيل طلب انضمامك بنجاح!
-                </h4>
-                <p className="text-light opacity-75 mb-3">
-                  أهلاً بك في عائلة جوالة كلية العلوم. سيتواصل معك فريق
-                  السكرتارية عبر واتساب قريباً.
-                </p>
-                {syncWarning && (
-                  <div className="alert alert-warning text-dark small py-2 mb-3">
-                    {syncWarning}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={resetAndClose}
-                  className="btn btn-gold px-5 rounded-pill"
-                >
-                  تمام
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleSubmit} noValidate>
-                {errors.general && (
-                  <div className="alert alert-danger py-2 small">
-                    {errors.general}
-                  </div>
-                )}
-
-                {/* حقل مخفي للحماية من البوتات */}
-                <input
-                  type="text"
-                  name="website"
-                  tabIndex="-1"
-                  autoComplete="off"
-                  value={form.website}
-                  onChange={(e) =>
-                    setForm({ ...form, website: e.target.value })
-                  }
-                  style={{ position: "absolute", left: "-9999px", opacity: 0 }}
-                />
-
-                <div className="mb-3">
-                  <label className="form-label fw-bold text-warning">
-                    الاسم الثلاثي
-                  </label>
-                  <input
-                    type="text"
-                    className={`form-control ${errors.name ? "is-invalid" : ""}`}
-                    required
-                    placeholder="مثال: أحمد محمد علي"
-                    value={form.name}
-                    onChange={(e) => {
-                      setForm({ ...form, name: e.target.value });
-                      if (errors.name) setErrors({ ...errors, name: "" });
-                    }}
-                  />
-                  {errors.name && (
-                    <div className="invalid-feedback d-block small">
-                      {errors.name}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mb-3">
-                  <label className="form-label fw-bold text-warning">
-                    الفرقة الدراسية
-                  </label>
-                  <select
-                    className="form-select"
-                    value={form.year}
-                    onChange={(e) => setForm({ ...form, year: e.target.value })}
-                  >
-                    <option>الفرقة الأولى</option>
-                    <option>الفرقة الثانية</option>
-                    <option>الفرقة الثالثة</option>
-                    <option>الفرقة الرابعة</option>
-                  </select>
-                </div>
-
-                <div className="mb-3">
-                  <label className="form-label fw-bold text-warning">
-                    رقم الواتساب
-                  </label>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={11}
-                    dir="ltr"
-                    className={`form-control text-start ${
-                      errors.phone ? "is-invalid" : ""
-                    }`}
-                    required
-                    placeholder="010xxxxxxxx"
-                    value={form.phone}
-                    onChange={(e) => {
-                      const onlyNums = e.target.value
-                        .replace(/\D/g, "")
-                        .slice(0, 11);
-                      setForm({ ...form, phone: onlyNums });
-                      if (errors.phone) setErrors({ ...errors, phone: "" });
-                    }}
-                  />
-                  {errors.phone && (
-                    <div className="invalid-feedback d-block small">
-                      {errors.phone}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mb-3">
-                  <label className="form-label fw-bold text-warning">
-                    اللجنة المفضلة
-                  </label>
-                  <select
-                    className="form-select"
-                    value={form.committee}
-                    onChange={(e) =>
-                      setForm({ ...form, committee: e.target.value })
-                    }
-                  >
-                    {(siteData?.committees || []).map((c) => (
-                      <option key={c.id} value={c.title}>
-                        {c.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="mb-4">
-                  <label className="form-label fw-bold text-warning">
-                    تأكيد الأمان: ما ناتج {challenge.a} + {challenge.b}؟
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    className={`form-control ${
-                      errors.captcha ? "is-invalid" : ""
-                    }`}
-                    required
-                    placeholder="اكتب الناتج هنا"
-                    value={captchaAnswer}
-                    onChange={(e) => {
-                      setCaptchaAnswer(e.target.value.replace(/\D/g, ""));
-                      if (errors.captcha)
-                        setErrors({ ...errors, captcha: "" });
-                    }}
-                  />
-                  {errors.captcha && (
-                    <div className="invalid-feedback d-block small">
-                      {errors.captcha}
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="btn btn-gold w-100 py-2 rounded-pill"
-                >
-                  {isSubmitting ? "جاري إرسال الطلب..." : "إرسال الطلب"}
-                </button>
-              </form>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+      {children}
+    </SiteContext.Provider>
   );
+}
+
+export function useSite() {
+  const ctx = useContext(SiteContext);
+  if (!ctx) {
+    throw new Error("useSite يجب أن يُستخدم داخل SiteProvider");
+  }
+  return ctx;
 }

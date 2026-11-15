@@ -34,14 +34,11 @@ function createChallenge() {
 export default function JoinModal({ show, onClose }) {
   const { addJoinRequest, siteData } = useSite();
 
-  const defaultCommittee =
-    siteData?.committees?.[0]?.title || "لجنة الميديا";
-
   const [form, setForm] = useState({
     name: "",
     year: "الفرقة الأولى",
     phone: "",
-    committee: defaultCommittee,
+    committee: "لجنة الميديا",
     website: "", // Honeypot ضد البوتات
   });
 
@@ -58,12 +55,8 @@ export default function JoinModal({ show, onClose }) {
       setCaptchaAnswer("");
       setErrors({});
       setSyncWarning("");
-      setForm((prev) => ({
-        ...prev,
-        committee: prev.committee || defaultCommittee,
-      }));
     }
-  }, [show, defaultCommittee]);
+  }, [show]);
 
   if (!show) return null;
 
@@ -88,62 +81,43 @@ export default function JoinModal({ show, onClose }) {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (isSubmitting) return;
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  if (submitting) return;
 
-    if (!validateAll()) return;
+  setErrorMsg("");
+  setSubmitting(true);
 
-    setIsSubmitting(true);
-    setSyncWarning("");
-    setErrors({});
+  const withTimeout = (promise, ms = 10000) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("انتهت مهلة الاتصال، حاول مرة أخرى.")), ms)
+      ),
+    ]);
 
-    const cleanedName = form.name.trim().replace(/\s+/g, " ");
-    const cleanedPhone = form.phone.replace(/\D/g, "");
+  try {
+    await withTimeout(
+      submitJoinRequestRemote({
+        name: form.name.trim(),
+        year: form.year,
+        phone: form.phone.trim(),
+        committee: form.committee,
+        status: "جديد",
+      }),
+      10000
+    );
 
-    const withTimeout = (promise, ms = 12000) =>
-      Promise.race([
-        promise,
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error("انتهت مهلة الاتصال، حاول مرة أخرى.")),
-            ms
-          )
-        ),
-      ]);
-
-    try {
-      const result = await withTimeout(
-        addJoinRequest({
-          name: cleanedName,
-          year: form.year,
-          phone: cleanedPhone,
-          committee: form.committee,
-          status: "جديد",
-        }),
-        12000
-      );
-
-      if (result && result.synced === false) {
-        setSyncWarning(
-          result.warning ||
-            "تم حفظ الطلب محلياً، وسيتمتزامن مع قاعدة البيانات عند توفر الاتصال."
-        );
-      }
-
-      setSubmitted(true);
-    } catch (err) {
-      console.error("Join request submit error:", err);
-      setErrors((prev) => ({
-        ...prev,
-        general:
-          err?.message ||
-          "تعذر إرسال الطلب الآن. تأكد من الاتصال والبيانات ثم حاول مرة أخرى.",
-      }));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    // نجاح الإرسال: صفّر الفورم واعرض رسالة نجاح أو اقفل المودال
+    setSuccessMsg("تم إرسال طلبك بنجاح!");
+  } catch (err) {
+    console.error("Submit error:", err);
+    setErrorMsg(err?.message || "تعذر إرسال الطلب، تأكد من البيانات والاتصال.");
+  } finally {
+    // هذا السطر يضمن 100% خروج الزر من حالة "جاري إرسال الطلب..."
+    setSubmitting(false);
+  }
+};
 
   const resetAndClose = () => {
     setSubmitted(false);
@@ -155,17 +129,14 @@ export default function JoinModal({ show, onClose }) {
       name: "",
       year: "الفرقة الأولى",
       phone: "",
-      committee: defaultCommittee,
+      committee: "لجنة الميديا",
       website: "",
     });
     onClose();
   };
 
   return (
-    <div
-      className="modal show d-block"
-      style={{ backgroundColor: "rgba(0,0,0,0.75)" }}
-    >
+    <div className="modal show d-block" style={{ backgroundColor: "rgba(0,0,0,0.75)" }}>
       <div className="modal-dialog modal-dialog-centered">
         <div className="modal-content rover-modal-content shadow">
           <div className="modal-header border-secondary">
@@ -185,32 +156,23 @@ export default function JoinModal({ show, onClose }) {
                 <div className="display-3 text-warning mb-3">
                   <i className="bi bi-check-circle-fill"></i>
                 </div>
-                <h4 className="fw-bold text-white mb-2">
-                  تم تسجيل طلب انضمامك بنجاح!
-                </h4>
+                <h4 className="fw-bold text-white mb-2">تم تسجيل طلب انضمامك بنجاح!</h4>
                 <p className="text-light opacity-75 mb-3">
-                  أهلاً بك في عائلة جوالة كلية العلوم. سيتواصل معك فريق
-                  السكرتارية عبر واتساب قريباً.
+                  أهلاً بك في عائلة جوالة كلية العلوم. سيتواصل معك فريق السكرتارية عبر واتساب قريباً.
                 </p>
                 {syncWarning && (
                   <div className="alert alert-warning text-dark small py-2 mb-3">
                     {syncWarning}
                   </div>
                 )}
-                <button
-                  type="button"
-                  onClick={resetAndClose}
-                  className="btn btn-gold px-5 rounded-pill"
-                >
+                <button onClick={resetAndClose} className="btn btn-gold px-5 rounded-pill">
                   تمام
                 </button>
               </div>
             ) : (
               <form onSubmit={handleSubmit} noValidate>
                 {errors.general && (
-                  <div className="alert alert-danger py-2 small">
-                    {errors.general}
-                  </div>
+                  <div className="alert alert-danger py-2 small">{errors.general}</div>
                 )}
 
                 {/* حقل مخفي للحماية من البوتات */}
@@ -220,16 +182,12 @@ export default function JoinModal({ show, onClose }) {
                   tabIndex="-1"
                   autoComplete="off"
                   value={form.website}
-                  onChange={(e) =>
-                    setForm({ ...form, website: e.target.value })
-                  }
+                  onChange={(e) => setForm({ ...form, website: e.target.value })}
                   style={{ position: "absolute", left: "-9999px", opacity: 0 }}
                 />
 
                 <div className="mb-3">
-                  <label className="form-label fw-bold text-warning">
-                    الاسم الثلاثي
-                  </label>
+                  <label className="form-label fw-bold text-warning">الاسم الثلاثي</label>
                   <input
                     type="text"
                     className={`form-control ${errors.name ? "is-invalid" : ""}`}
@@ -242,16 +200,12 @@ export default function JoinModal({ show, onClose }) {
                     }}
                   />
                   {errors.name && (
-                    <div className="invalid-feedback d-block small">
-                      {errors.name}
-                    </div>
+                    <div className="invalid-feedback d-block small">{errors.name}</div>
                   )}
                 </div>
 
                 <div className="mb-3">
-                  <label className="form-label fw-bold text-warning">
-                    الفرقة الدراسية
-                  </label>
+                  <label className="form-label fw-bold text-warning">الفرقة الدراسية</label>
                   <select
                     className="form-select"
                     value={form.year}
@@ -265,47 +219,35 @@ export default function JoinModal({ show, onClose }) {
                 </div>
 
                 <div className="mb-3">
-                  <label className="form-label fw-bold text-warning">
-                    رقم الواتساب
-                  </label>
+                  <label className="form-label fw-bold text-warning">رقم الواتساب</label>
                   <input
                     type="tel"
                     inputMode="numeric"
                     maxLength={11}
                     dir="ltr"
-                    className={`form-control text-start ${
-                      errors.phone ? "is-invalid" : ""
-                    }`}
+                    className={`form-control text-start ${errors.phone ? "is-invalid" : ""}`}
                     required
                     placeholder="010xxxxxxxx"
                     value={form.phone}
                     onChange={(e) => {
-                      const onlyNums = e.target.value
-                        .replace(/\D/g, "")
-                        .slice(0, 11);
+                      const onlyNums = e.target.value.replace(/\D/g, "").slice(0, 11);
                       setForm({ ...form, phone: onlyNums });
                       if (errors.phone) setErrors({ ...errors, phone: "" });
                     }}
                   />
                   {errors.phone && (
-                    <div className="invalid-feedback d-block small">
-                      {errors.phone}
-                    </div>
+                    <div className="invalid-feedback d-block small">{errors.phone}</div>
                   )}
                 </div>
 
                 <div className="mb-3">
-                  <label className="form-label fw-bold text-warning">
-                    اللجنة المفضلة
-                  </label>
+                  <label className="form-label fw-bold text-warning">اللجنة المفضلة</label>
                   <select
                     className="form-select"
                     value={form.committee}
-                    onChange={(e) =>
-                      setForm({ ...form, committee: e.target.value })
-                    }
+                    onChange={(e) => setForm({ ...form, committee: e.target.value })}
                   >
-                    {(siteData?.committees || []).map((c) => (
+                    {siteData.committees.map((c) => (
                       <option key={c.id} value={c.title}>
                         {c.title}
                       </option>
@@ -320,22 +262,17 @@ export default function JoinModal({ show, onClose }) {
                   <input
                     type="text"
                     inputMode="numeric"
-                    className={`form-control ${
-                      errors.captcha ? "is-invalid" : ""
-                    }`}
+                    className={`form-control ${errors.captcha ? "is-invalid" : ""}`}
                     required
                     placeholder="اكتب الناتج هنا"
                     value={captchaAnswer}
                     onChange={(e) => {
                       setCaptchaAnswer(e.target.value.replace(/\D/g, ""));
-                      if (errors.captcha)
-                        setErrors({ ...errors, captcha: "" });
+                      if (errors.captcha) setErrors({ ...errors, captcha: "" });
                     }}
                   />
                   {errors.captcha && (
-                    <div className="invalid-feedback d-block small">
-                      {errors.captcha}
-                    </div>
+                    <div className="invalid-feedback d-block small">{errors.captcha}</div>
                   )}
                 </div>
 
