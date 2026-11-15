@@ -58,7 +58,7 @@ export async function signInAdmin(email, password) {
   });
 
   if (error) {
-    throw new Error("بيانات الدخول غير صحيحة أو الحساب غير مفعل.");
+    throw new Error(error.message);
   }
 
   return data.user;
