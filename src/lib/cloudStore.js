@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").trim();
-const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+const RAW_URL = (import.meta.env.VITE_SUPABASE_URL || "").trim().replace(/\/+$/, "");
+const RAW_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+
 const STORAGE_BUCKET = "rover-media";
 const CONFIG_ROW_ID = "main";
 const ALLOWED_MIME_TYPES = new Set([
@@ -12,14 +13,16 @@ const ALLOWED_MIME_TYPES = new Set([
 ]);
 
 export const isCloudConfigured = Boolean(
-  SUPABASE_URL &&
-    SUPABASE_ANON_KEY &&
-    !SUPABASE_URL.includes("YOUR_") &&
-    !SUPABASE_ANON_KEY.includes("YOUR_")
+  RAW_URL &&
+    RAW_KEY &&
+    RAW_URL.startsWith("https://") &&
+    !RAW_URL.includes("YOUR_") &&
+    !RAW_KEY.includes("YOUR_") &&
+    RAW_KEY.length > 15
 );
 
 export const supabase = isCloudConfigured
-  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  ? createClient(RAW_URL, RAW_KEY, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
